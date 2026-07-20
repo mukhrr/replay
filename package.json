@@ -34,7 +34,8 @@
     "build:agent": "tsx scripts/build-agent.ts",
     "prebuild": "npm run build:agent",
     "pretest": "npm run build:agent",
-    "prestress": "npm run build:agent"
+    "prestress": "npm run build:agent",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
