@@ -43,15 +43,18 @@ export function isStableToken(t: string): boolean {
 
 /**
  * A token that reads like a nanoid rather than a word: long enough to be
- * opaque, carries a digit, and is starved of vowels. `zb5bjyh` qualifies;
- * `button2` and `sidebar` do not.
+ * opaque and starved of vowels.
+ *
+ * Two shapes. With a digit, one vowel is already suspicious (`zb5bjyh`).
+ * Without one, it takes a total absence of vowels — which is what catches
+ * React Native Web's digit-free atomic hashes (`dnmrzs` in `div.r-dnmrzs`).
+ * `y` counts as a vowel so ordinary words like `rhythm` survive.
  */
 function looksGenerated(segment: string): boolean {
   if (segment.length < 6) return false;
   if (!/^[a-z0-9]+$/i.test(segment)) return false;
-  if (!/\d/.test(segment)) return false;
-  const vowels = (segment.match(/[aeiou]/gi) || []).length;
-  return vowels <= 1;
+  const vowels = (segment.match(/[aeiouy]/gi) || []).length;
+  return /\d/.test(segment) ? vowels <= 1 : vowels === 0;
 }
 
 export function isStableClass(c: string): boolean {

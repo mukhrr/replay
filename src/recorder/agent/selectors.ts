@@ -150,6 +150,7 @@ export function buildCandidates(el: Element): string[] {
   }
 
   push(buildCssPath(el));
+  push(labelledAncestorSelector(el));
 
   const text = ownText(el);
   if (text && isSmallestWithText(el, text)) {
@@ -158,6 +159,36 @@ export function buildCandidates(el: Element): string[] {
   }
 
   return out.slice(0, MAX_CANDIDATES);
+}
+
+/**
+ * The nearest identifiable ancestor, offered as a late fallback.
+ *
+ * When a click lands on an inner node of a labelled control, the CSS path
+ * descends from the label into style hashes and there is nothing else to fall
+ * back to. The labelled ancestor is usually clickable and always more durable,
+ * so it is worth having behind the more precise candidates.
+ *
+ * Only offered when the element has no identity of its own, and only for
+ * ancestors close enough to be the same control.
+ */
+function labelledAncestorSelector(el: Element): string | null {
+  if (testIdSelector(el) ?? idSelector(el)) return null;
+
+  let cur = el.parentElement;
+  for (let depth = 0; cur && depth < 3; depth++) {
+    const anchor = testIdSelector(cur);
+    if (anchor) {
+      try {
+        // Ambiguous ancestors are worse than no fallback at all.
+        return document.querySelectorAll(anchor).length === 1 ? anchor : null;
+      } catch {
+        return null;
+      }
+    }
+    cur = cur.parentElement;
+  }
+  return null;
 }
 
 /**

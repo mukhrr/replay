@@ -156,6 +156,31 @@ describe('candidate generation', () => {
     expect(cssPath).toBe('div.sensor-row > span');
   });
 
+  it('offers a labelled ancestor when the click lands on an inner node', async () => {
+    // Real report: `[data-sentry-label="Search-FilterSaveButton"] > div.r-dnmrzs > div`
+    // was the ONLY fallback, and r-dnmrzs is a style hash. The labelled
+    // ancestor alone is clickable and survives a restyle.
+    const candidates = await ask(
+      `<div data-sentry-label="Search-FilterSaveButton">
+         <div class="r-dnmrzs"><div>Save</div></div>
+       </div>`,
+      '[data-sentry-label] div div',
+      'buildCandidates',
+    );
+    expect(candidates).toContain('[data-sentry-label="Search-FilterSaveButton"]');
+    expect(candidates.every((c) => !c.includes('r-dnmrzs'))).toBe(true);
+  });
+
+  it('treats data-sentry-label as a top-tier identifier', async () => {
+    // Real apps label for telemetry far more consistently than they add test ids.
+    const candidates = await ask(
+      '<button data-sentry-label="SignIn-Continue">Continue</button>',
+      'button',
+      'buildCandidates',
+    );
+    expect(candidates[0]).toBe('[data-sentry-label="SignIn-Continue"]');
+  });
+
   it('anchors a CSS path on the nearest test id ancestor', async () => {
     // Two structurally identical rows, so the path stays ambiguous until it
     // reaches something addressable.
