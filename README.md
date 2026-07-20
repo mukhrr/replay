@@ -164,6 +164,26 @@ Without this a repro of a crash would fail its own replay the moment you recorde
 
 `noFailedRequests` is scoped to URL patterns seen at record time, so a third-party analytics beacon returning 404 can never fail your repro.
 
+### When a repro is single-shot
+
+Some flows mutate **server** state — saving a search, creating a record. Replayed as recorded, the second run finds the work already done, so the bug cannot recur and `--expect-fixed` passes whether or not you fixed anything. That is a silent false pass, and session seeding cannot help: the mutation is not on the client.
+
+Two ways out:
+
+```bash
+# reset state before each replay
+repro run my-bug --setup "npm run db:reset"
+```
+
+```jsonc
+// or make the input unique, so every run creates fresh state
+"value": "merchant:walmart-{{random}}"   // {{uuid}} {{now}} {{isodate}}
+```
+
+`--setup` is a CLI/API option and deliberately **not** a field in the IR: a repro file is something you download, hand-edit and share, and one that can execute shell commands is a liability.
+
+When `--expect-fixed` passes but most steps did not behave as recorded, the run says so — that pattern is what a single-shot repro looks like on its second run.
+
 ## How waits work
 
 Replay never sleeps. Every wait is on a signal the recording actually observed, so a step completes the instant the app reacts. That is where the speed comes from — the 1.5s endpoint in the demo app costs 1.79s on replay, not a padded fixed delay.

@@ -75,6 +75,7 @@ program
   .option('--expect-fixed', 'pass when the bug no longer happens — use while fixing', false)
   .option('-u, --url <baseUrl>', 'override the recorded base URL')
   .option('--profile <dir>', 'replay against a persistent Chromium profile (reuses a login)')
+  .option('--setup <command>', 'shell command to reset state before replaying')
   .option(
     '--resolve-timeout <ms>',
     'budget for the first selector candidate; raise it for slow-booting SPAs',
@@ -92,6 +93,7 @@ program
       baseUrl: opts.url,
       expectFixed: opts.expectFixed,
       profileDir: opts.profile ?? null,
+      setupCommand: opts.setup ?? null,
       // Fallbacks stay cheap probes: half the primary budget.
       resolveTimeouts: { first, subsequent: Math.max(200, Math.round(first / 2)) },
     });

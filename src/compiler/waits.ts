@@ -1,5 +1,6 @@
 import type { NetworkWait, WaitAfter } from '../ir/schema.js';
 import type { RawDomEvent, RawNetworkEvent } from '../recorder/types.js';
+import { isIncidentalRequest } from '../noise.js';
 import { normalizeUrlPattern } from './normalize.js';
 
 export interface WaitRules {
@@ -53,6 +54,7 @@ export function buildWaitAfter(
 
   const triggered = window.network.filter(
     (n) =>
+      !isIncidentalRequest(n.url) &&
       n.startedAt >= actionAt &&
       n.startedAt <= actionAt + rules.triggerWindowMs &&
       n.settledAt !== null &&

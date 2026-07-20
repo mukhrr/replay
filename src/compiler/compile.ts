@@ -6,6 +6,7 @@ import {
   type Step,
 } from '../ir/schema.js';
 import type { RawActionEvent, RecordingTrace } from '../recorder/types.js';
+import { isAmbientConsoleError, isIncidentalRequest } from '../noise.js';
 import { isSameOrigin, normalizeUrlPattern } from './normalize.js';
 import { buildWaitAfter, DEFAULT_WAIT_RULES, type WaitRules } from './waits.js';
 
@@ -124,6 +125,8 @@ export function compile(trace: RecordingTrace, options: CompileOptions): Repro {
     return step;
   });
 
+  dropRerenderChurn(steps);
+
   return {
     version: IR_VERSION,
     name: options.name,
@@ -138,28 +141,6 @@ export function compile(trace: RecordingTrace, options: CompileOptions): Repro {
 }
 
 /**
- * Console noise that is a property of the environment, not of the app's bug.
- *
- * A production SPA logs these constantly — blocked third-party beacons, CORS
- * preflights, DNS failures, extension chatter. Recording them as the bug's
- * signature makes `--expect-fixed` report "bug still present" forever, so an
- * agent in a fix loop keeps editing code that was already correct. A tool that
- * cries wolf permanently is worse than one with no check at all.
- */
-const AMBIENT_ERROR_PATTERNS = [
-  /blocked by CORS policy/i,
-  /Access-Control-Allow-Origin/i,
-  /net::ERR_/i,
-  /ERR_NAME_NOT_RESOLVED/i,
-  /Failed to load resource/i,
-  /chrome-extension:/i,
-  /Content Security Policy/i,
-  /favicon/i,
-  /ResizeObserver loop/i,
-  /Download the React DevTools/i,
-];
-
-/**
  * Console errors plausibly caused by the recorded flow.
  *
  * Two filters. Ambient patterns are dropped outright. Anything logged before
@@ -172,7 +153,27 @@ function bugSignatureErrors(trace: RecordingTrace): string[] {
   return trace.console
     .filter((c) => c.t >= firstAction)
     .map((c) => c.text)
-    .filter((text) => !AMBIENT_ERROR_PATTERNS.some((re) => re.test(text)));
+    .filter((text) => !isAmbientConsoleError(text));
+}
+
+/**
+ * A selector that vanishes on one step and returns on the next is a component
+ * re-mounting, not a state change. Replay sees the element present throughout
+ * and can satisfy neither half, so both are dropped.
+ */
+function dropRerenderChurn(steps: Step[]): void {
+  for (let i = 0; i < steps.length - 1; i++) {
+    const a = steps[i];
+    const b = steps[i + 1];
+    if (!a || !b) continue;
+    const gone = new Set(a.waitAfter.domGone ?? []);
+    const churned = (b.waitAfter.domAppeared ?? []).filter((s) => gone.has(s));
+    if (!churned.length) continue;
+    a.waitAfter.domGone = (a.waitAfter.domGone ?? []).filter((s) => !churned.includes(s));
+    b.waitAfter.domAppeared = (b.waitAfter.domAppeared ?? []).filter((s) => !churned.includes(s));
+    if (!a.waitAfter.domGone.length) delete a.waitAfter.domGone;
+    if (!b.waitAfter.domAppeared.length) delete b.waitAfter.domAppeared;
+  }
 }
 
 /**
@@ -196,7 +197,7 @@ export function deriveAssertion(steps: Step[], trace: RecordingTrace): Assertion
 
   // Third-party failures are not this app's bug and must not disable the check.
   const failedRequests = trace.network
-    .filter((n) => n.failed && isSameOrigin(n.url, trace.baseUrl))
+    .filter((n) => n.failed && isSameOrigin(n.url, trace.baseUrl) && !isIncidentalRequest(n.url))
     .map((n) => ({
       urlPattern: normalizeUrlPattern(n.url, trace.baseUrl),
       method: n.method,

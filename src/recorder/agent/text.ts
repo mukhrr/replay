@@ -34,7 +34,24 @@ export function isStableToken(t: string): boolean {
   // Web emits these (r-1awozwy, r-1mdbw0j) and they change whenever styling
   // does, so a CSS path built from them breaks on the next restyle.
   if (/^[a-z]{1,2}-[a-z0-9]{5,}$/i.test(t) && /\d/.test(t)) return false;
+  // Per-session ids from a11y announcers and portal libraries (#zb5bjyh-aria).
+  // They are regenerated on every page load, so they can never match on a
+  // later run — a wait on one is guaranteed to time out.
+  if (t.split(/[-_]/).some(looksGenerated)) return false;
   return true;
+}
+
+/**
+ * A token that reads like a nanoid rather than a word: long enough to be
+ * opaque, carries a digit, and is starved of vowels. `zb5bjyh` qualifies;
+ * `button2` and `sidebar` do not.
+ */
+function looksGenerated(segment: string): boolean {
+  if (segment.length < 6) return false;
+  if (!/^[a-z0-9]+$/i.test(segment)) return false;
+  if (!/\d/.test(segment)) return false;
+  const vowels = (segment.match(/[aeiou]/gi) || []).length;
+  return vowels <= 1;
 }
 
 export function isStableClass(c: string): boolean {

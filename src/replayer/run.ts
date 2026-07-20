@@ -1,6 +1,8 @@
+import { exec } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { Page } from 'playwright';
 import { openBrowser } from '../browser.js';
 import type { Repro, Step, Target } from '../ir/schema.js';
@@ -15,7 +17,10 @@ import {
   TargetResolutionError,
   type ResolveTimeouts,
 } from './resolve.js';
+import { expandValue } from './values.js';
 import { waitForReaction } from './waits.js';
+
+const execAsync = promisify(exec);
 
 export interface StepTiming {
   id: string;
@@ -88,6 +93,13 @@ export interface RunOptions {
   onStepFailure?: (target: Target, page: Page) => Promise<string | null>;
   /** Replay against a persistent Chromium profile (e.g. to reuse a login). */
   profileDir?: string | null;
+  /**
+   * Shell command run before the browser opens, to reset state the flow mutates.
+   *
+   * Deliberately NOT a field in the IR: a repro file is something you download,
+   * hand-edit and share, and one that can execute commands is a liability.
+   */
+  setupCommand?: string | null;
 }
 
 export async function runRepro(repro: Repro, options: RunOptions = {}): Promise<RunResult> {
@@ -97,6 +109,10 @@ export async function runRepro(repro: Repro, options: RunOptions = {}): Promise<
   const expectFixed = options.expectFixed ?? false;
   const notes: string[] = [];
   const startedAt = Date.now();
+
+  if (options.setupCommand) {
+    await execAsync(options.setupCommand);
+  }
 
   const opened = await openBrowser({
     headless: !options.headed,
@@ -278,6 +294,18 @@ export async function runRepro(repro: Repro, options: RunOptions = {}): Promise<
       );
     }
 
+    if (expectFixed && repro.steps.length >= 3 && notes.length >= Math.ceil(repro.steps.length / 2)) {
+      // Most of the flow behaved nothing like the recording. That is what a
+      // single-shot repro looks like on its second run — the state it depended
+      // on already exists, so the bug cannot recur and the pass means nothing.
+      notes.push(
+        `WARNING: ${notes.length} of ${repro.steps.length} steps did not reproduce their recorded reaction. ` +
+          `This repro may be single-shot: if the flow mutates server state, replays after the first ` +
+          `cannot exercise the same path and will pass regardless of any fix. ` +
+          `Use --setup to reset state, or make inputs unique with {{random}}.`,
+      );
+    }
+
     return {
       name: repro.name,
       passed: true,
@@ -442,10 +470,10 @@ async function performStep(
       await locator.hover();
       break;
     case 'fill':
-      await locator.fill(step.value ?? '');
+      await locator.fill(expandValue(step.value) ?? '');
       break;
     case 'select':
-      await locator.selectOption(step.value ?? '');
+      await locator.selectOption(expandValue(step.value) ?? '');
       break;
     case 'press':
       await locator.press(step.value ?? 'Enter');

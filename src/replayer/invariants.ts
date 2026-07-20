@@ -1,4 +1,5 @@
 import { matchesUrlPattern } from '../compiler/normalize.js';
+import { isAmbientConsoleError, isIncidentalRequest } from '../noise.js';
 import type { NetworkWait, Repro } from '../ir/schema.js';
 import type { RawConsoleEvent, RawNetworkEvent } from '../recorder/types.js';
 
@@ -47,7 +48,9 @@ export function checkBugRecurred(
   const recurred: string[] = [];
 
   const normalize = (s: string): string => s.replace(/\s+/g, ' ').trim();
-  const live = consoleErrors.map((c) => normalize(c.text));
+  const live = consoleErrors
+    .filter((c) => !isAmbientConsoleError(c.text))
+    .map((c) => normalize(c.text));
   for (const recorded of observed.consoleErrors) {
     // Compare on a prefix: stack frames and ids drift between runs, the
     // message that identifies the bug does not.
@@ -83,7 +86,11 @@ export function checkInvariants(
   const violations: InvariantViolation[] = [];
 
   if (repro.assertion.invariants.noConsoleErrors) {
+    // Same filter the compiler used. Without it the invariant is inferred from
+    // filtered output but enforced against raw output, so ambient CORS and
+    // connection errors fail every replay of a perfectly healthy app.
     for (const err of consoleErrors) {
+      if (isAmbientConsoleError(err.text)) continue;
       violations.push({ invariant: 'noConsoleErrors', detail: err.text });
     }
   }
@@ -91,7 +98,7 @@ export function checkInvariants(
   if (repro.assertion.invariants.noFailedRequests) {
     const patterns = recordedPatterns(repro);
     for (const n of network) {
-      if (!n.failed) continue;
+      if (!n.failed || isIncidentalRequest(n.url)) continue;
       const inScope = patterns.some(
         (p) =>
           p.method.toUpperCase() === n.method.toUpperCase() &&

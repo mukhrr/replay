@@ -1,5 +1,7 @@
 import type { AgentConfig } from './config.js';
 import type { RevealTracker } from './reveal-tracker.js';
+import { isTransientIndicator } from '../../noise.js';
+import { accessibleName, getRole } from './roles.js';
 import { appearedSelector, goneSelector } from './selectors.js';
 import type { Transport } from './transport.js';
 import { isVisible } from './visibility.js';
@@ -115,8 +117,14 @@ export function observeDomReactions(ctx: DomReactionContext): DomReactionHandle 
   };
 
   // Only rendered elements make usable appear-signals; see visibility.ts.
-  const visibleAppearedSelector = (el: Element): string | null =>
-    isVisible(el) ? appearedSelector(el) : null;
+  // Loading indicators are excluded by what they are, not how long they last:
+  // a spinner genuinely survives to the next action on a cold run, then never
+  // renders at all once the data is cached — so a healthy replay would fail.
+  const visibleAppearedSelector = (el: Element): string | null => {
+    if (!isVisible(el)) return null;
+    if (isTransientIndicator(getRole(el), accessibleName(el))) return null;
+    return appearedSelector(el);
+  };
 
   const start = (): void => {
     const observer = new MutationObserver((records) => {
