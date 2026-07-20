@@ -6,6 +6,7 @@ import { isIncidentalRequest } from '../src/noise.js';
 import { createExpander, hasPlaceholder } from '../src/replayer/values.js';
 import type { Repro } from '../src/ir/schema.js';
 import type { RawActionEvent, RecordingTrace } from '../src/recorder/types.js';
+import { pathOf } from '../src/recorder/attach.js';
 
 /**
  * Regressions found the first time this tool met a real codebase (Expensify).
@@ -272,5 +273,24 @@ describe('single-shot repros', () => {
     expect(e.expand(null)).toBeNull();
     expect(hasPlaceholder('Weekly rollup')).toBe(false);
     expect(hasPlaceholder('{{uuid}}')).toBe(true);
+  });
+});
+
+describe('hash-routed apps', () => {
+  const BASE_URL = 'http://localhost:3006';
+
+  it('keeps the fragment, which is the whole route', () => {
+    // Dropping it recorded "/app.html" for "/app.html#/sensors", so every
+    // replay opened the default screen and failed on step one for a reason
+    // unrelated to the bug.
+    expect(pathOf(`${BASE_URL}/app.html#/sensors`, BASE_URL)).toBe('/app.html#/sensors');
+    expect(pathOf(`${BASE_URL}/app.html#/sensors?tab=graph`, BASE_URL)).toBe(
+      '/app.html#/sensors?tab=graph',
+    );
+  });
+
+  it('leaves plain paths alone', () => {
+    expect(pathOf(`${BASE_URL}/app.html`, BASE_URL)).toBe('/app.html');
+    expect(pathOf(`${BASE_URL}/`, BASE_URL)).toBe('/');
   });
 });

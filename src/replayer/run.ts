@@ -598,7 +598,7 @@ function rebase(recorded: string | null, baseUrl: string): string {
   if (!recorded) return baseUrl;
   try {
     const u = new URL(recorded);
-    return new URL(`${u.pathname}${u.search}`, baseUrl).toString();
+    return new URL(`${u.pathname}${u.search}${u.hash}`, baseUrl).toString();
   } catch {
     return new URL(recorded, baseUrl).toString();
   }

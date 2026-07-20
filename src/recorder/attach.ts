@@ -182,13 +182,20 @@ export async function flushPageReactions(page: Page): Promise<void> {
   }
 }
 
-/** Path + query relative to baseUrl, defaulting to "/" for anything unparseable. */
+/**
+ * Path, query and fragment relative to baseUrl.
+ *
+ * The fragment is part of the address, not decoration: a hash-routed app keeps
+ * its entire route there. Dropping it recorded `/app.html` for
+ * `/app.html#/sensors`, so every replay opened the default screen and failed on
+ * step one for a reason that had nothing to do with the bug.
+ */
 export function pathOf(url: string, baseUrl: string): string {
   try {
     const u = new URL(url);
     const base = new URL(baseUrl);
     if (u.origin !== base.origin) return url;
-    return `${u.pathname}${u.search}` || '/';
+    return `${u.pathname}${u.search}${u.hash}` || '/';
   } catch {
     return '/';
   }
