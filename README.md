@@ -176,6 +176,51 @@ If an action produced no observable reaction at all, `waitAfter` becomes `{ "tim
 
 Any signal that never arrives is named individually in the failure output.
 
+## Use it from your coding agent (MCP)
+
+Replay is a deterministic **eye**. It never calls a model — your agent already is one. Its job is to observe what the browser did and hand that to whatever brain you're using: Claude Code, Codex, Gemini CLI, Cursor.
+
+```json
+{
+  "mcpServers": {
+    "replay": { "command": "npx", "args": ["repro-mcp"] }
+  }
+}
+```
+
+Claude Code: `claude mcp add replay -- npx repro-mcp`
+
+Three tools: `repro_run`, `repro_list`, `repro_artifacts`.
+
+One `repro_run` call returns everything the agent needs to decide what to do next:
+
+```
+PASS (expect-fixed) — checkout-crash, 10/10 steps in 3.12s
+The flow completed and the recorded bug did not occur. The fix holds.
+
++ structured: { passed, durationMs, totalSteps, failure, invariantViolations }
++ image:      the resulting page, inline (33 kB)
+```
+
+On failure it returns the failing step, a plain-language description of what that step does (`Delete Sensor 2 button in the row containing "Sensor 2"`), what was expected, what happened, the console tail, the network log, and a screenshot.
+
+**The screenshot comes back as image content, not a file path.** That is what makes it an eye: the model *sees* the page. Replay does not judge whether a layout looks wrong — that is the brain's job — it makes the visual state legible so the brain can.
+
+Measured end to end over stdio: **one tool call, 3.15 s**. Driving a browser through an agent step by step costs a model round trip per action, and costs it again on every re-verification. This costs one, every time.
+
+### Verifying a fix
+
+`repro run` asserts the bug **still** reproduces — right for confirming a fresh repro is sound, backwards while you're fixing something. Pass `expect_fixed` (or `--expect-fixed` on the CLI) to invert it:
+
+```bash
+repro run checkout-crash                 # ✓ PASS   the bug still happens
+repro run checkout-crash --expect-fixed  # ✓ FIXED  the bug no longer happens
+```
+
+Under `--expect-fixed` a step's recorded reaction becomes a note rather than a failure, because after a real fix the app is *supposed* to react differently. What must hold is that the flow still walks and the specific evidence recorded in `observedAtRecord` does not recur. That check is deliberately narrow — it looks for the exact console error and failed request seen at authoring time, not for "any console error", so an app that always logs a benign warning can still pass.
+
+If the bug left no console or network trace — a layout break, a wrong value on screen — Replay reports that the flow completed cleanly and hands over the screenshot. Judging that one is the brain's job.
+
 ## Programmatic API
 
 The CLI is a thin wrapper over these — the same functions the forthcoming MCP server wraps.

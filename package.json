@@ -8,7 +8,8 @@
     "node": ">=20"
   },
   "bin": {
-    "repro": "./dist/cli/index.js"
+    "repro": "./dist/cli/index.js",
+    "repro-mcp": "./dist/mcp/index.js"
   },
   "main": "./dist/api.js",
   "types": "./dist/api.d.ts",
@@ -36,6 +37,7 @@
     "prestress": "npm run build:agent"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^15.0.0",
     "playwright": "^1.61.1",
     "zod": "^4.4.3"

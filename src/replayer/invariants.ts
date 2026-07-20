@@ -28,6 +28,52 @@ export interface InvariantViolation {
   detail: string;
 }
 
+/**
+ * Did the specific bug this repro captured happen again?
+ *
+ * Deliberately narrow: it looks for the exact evidence recorded at authoring
+ * time, not for "any console error". An app that always logs a benign warning
+ * would otherwise never pass --expect-fixed, and a tool that cries wolf gets
+ * turned off.
+ */
+export function checkBugRecurred(
+  repro: Repro,
+  network: RawNetworkEvent[],
+  consoleErrors: RawConsoleEvent[],
+  baseUrl: string,
+): string[] {
+  const observed = repro.assertion.observedAtRecord;
+  if (!observed) return [];
+  const recurred: string[] = [];
+
+  const normalize = (s: string): string => s.replace(/\s+/g, ' ').trim();
+  const live = consoleErrors.map((c) => normalize(c.text));
+  for (const recorded of observed.consoleErrors) {
+    // Compare on a prefix: stack frames and ids drift between runs, the
+    // message that identifies the bug does not.
+    const needle = normalize(recorded).slice(0, 80);
+    if (needle && live.some((l) => l.includes(needle))) {
+      recurred.push(`console error recurred: ${recorded}`);
+    }
+  }
+
+  for (const recorded of observed.failedRequests) {
+    const again = network.some(
+      (n) =>
+        n.failed &&
+        n.method.toUpperCase() === recorded.method.toUpperCase() &&
+        matchesUrlPattern(n.url, recorded.urlPattern, baseUrl),
+    );
+    if (again) {
+      recurred.push(
+        `request failed again: ${recorded.method} ${recorded.urlPattern} -> ${recorded.status ?? 'aborted'}`,
+      );
+    }
+  }
+
+  return recurred;
+}
+
 export function checkInvariants(
   repro: Repro,
   network: RawNetworkEvent[],

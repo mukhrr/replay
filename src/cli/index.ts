@@ -70,10 +70,16 @@ program
   .command('run')
   .argument('<name>', 'name of the repro to replay')
   .option('--headed', 'watch the replay in a visible browser', false)
+  .option('--expect-fixed', 'pass when the bug no longer happens — use while fixing', false)
   .option('-u, --url <baseUrl>', 'override the recorded base URL')
   .description('replay a repro at machine speed and assert the recorded outcome')
   .action(async (name: string, opts) => {
-    const result = await run({ name, headed: opts.headed, baseUrl: opts.url });
+    const result = await run({
+      name,
+      headed: opts.headed,
+      baseUrl: opts.url,
+      expectFixed: opts.expectFixed,
+    });
     result.passed ? reportPass(result) : reportFail(result);
     process.exitCode = result.passed ? 0 : 1;
   });
@@ -119,15 +125,20 @@ function reportPass(result: RunResult): void {
     ]),
   ];
   console.log(table(rows));
+  for (const note of result.notes) console.log(dim(`  note  ${note}`));
   console.log('');
+  const verdict = result.expectFixed
+    ? `${green('✓ FIXED')} ${dim('— the flow completed and the bug did not happen')}`
+    : `${green('✓ PASS')}  ${dim('— the recorded outcome still occurs')}`;
   console.log(
-    `${green('✓ PASS')}  ${bold(result.name)} ${dim(`— ${result.timings.length} steps in ${ms(result.durationMs)}`)}`,
+    `${verdict}  ${bold(result.name)} ${dim(`(${result.timings.length} steps in ${ms(result.durationMs)})`)}`,
   );
 }
 
 function reportFail(result: RunResult): void {
   const f = result.failure;
-  console.log(`${red('✗ FAIL')}  ${bold(result.name)} ${dim(`after ${ms(result.durationMs)}`)}`);
+  const label = result.expectFixed ? '✗ NOT FIXED' : '✗ FAIL';
+  console.log(`${red(label)}  ${bold(result.name)} ${dim(`after ${ms(result.durationMs)}`)}`);
   if (!f) return;
 
   console.log('');
