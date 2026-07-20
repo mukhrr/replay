@@ -110,6 +110,16 @@ export const AssertionSchema = z.object({
    */
   mode: z.enum(['expect-bug', 'expect-fixed']).default('expect-bug'),
   finalState: FinalStateSchema,
+  /**
+   * What must be TRUE once the bug is fixed. Hand-written; nothing derives it.
+   *
+   * `finalState` describes the buggy end state, so it cannot double as a fix
+   * criterion. Without this, a bug that leaves no console error and no failed
+   * request — a missing element, a wrong number, a broken layout — gives
+   * `--expect-fixed` nothing to check, and a tool that reports success after
+   * checking nothing is worse than one that refuses to answer.
+   */
+  expectedWhenFixed: FinalStateSchema.optional(),
   invariants: InvariantsSchema,
   observedAtRecord: ObservedAtRecordSchema.optional(),
 });

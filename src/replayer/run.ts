@@ -10,7 +10,13 @@ import { reproPaths, type ReproPaths } from '../ir/io.js';
 import { collectReactions } from '../recorder/reaction.js';
 import type { RawConsoleEvent, RawNetworkEvent } from '../recorder/types.js';
 import { writeFailureArtifacts, type WrittenArtifacts } from './artifacts.js';
-import { checkBugRecurred, checkInvariants, type InvariantViolation } from './invariants.js';
+import {
+  checkBugRecurred,
+  checkInvariants,
+  hasBugSignature,
+  hasFixCriterion,
+  type InvariantViolation,
+} from './invariants.js';
 import {
   DEFAULT_RESOLVE_TIMEOUTS,
   resolveTarget,
@@ -258,6 +264,63 @@ export async function runRepro(repro: Repro, options: RunOptions = {}): Promise<
       ? await captureEndState(page, paths)
       : null;
 
+    if (expectFixed) {
+      // Refuse to certify a fix we had no way to check.
+      //
+      // Under this polarity a changed step reaction is downgraded to a note —
+      // correctly, since a fix is supposed to change behaviour. But that left
+      // nothing able to fail for a bug with no console error and no failed
+      // request: a missing element, a wrong number, a broken layout all
+      // reported FIXED while the page was visibly still broken. Reporting
+      // success after checking nothing is the worst thing this tool can do,
+      // so it now says so instead.
+      if (!hasFixCriterion(repro) && !hasBugSignature(repro)) {
+        const last = repro.steps[repro.steps.length - 1];
+        return await fail(
+          { paths, page, repro, reactions, timings, startedAt, since: stepStart, expectFixed, notes },
+          {
+            stepId: last?.id ?? 'assertion',
+            stepIndex: repro.steps.length - 1,
+            semantic: 'fix criterion',
+            expected: 'something that distinguishes fixed from broken',
+            observed:
+              'This repro records no console error and no failed request, so there is nothing ' +
+              '--expect-fixed can check. It would pass whether or not you fixed anything.\n' +
+              '      Add what must be TRUE once fixed, e.g.:\n' +
+              '        "assertion": { "expectedWhenFixed": { "domAppeared": ["text=Total spend"] } }\n' +
+              '      Use `repro run` (without --expect-fixed) to confirm the bug still reproduces.',
+          },
+        );
+      }
+
+      if (hasFixCriterion(repro)) {
+        const expected = repro.assertion.expectedWhenFixed!;
+        const outcome = await waitForReaction(
+          { page, baseUrl, network: reactions.network, since: stepStart },
+          {
+            ...(expected.domAppeared?.length
+              ? { domAppeared: expand.expandAll(expected.domAppeared) }
+              : {}),
+            ...(expected.domGone?.length ? { domGone: expand.expandAll(expected.domGone) } : {}),
+            timeoutMs: FINAL_STATE_TIMEOUT_MS,
+          },
+        );
+        if (!outcome.ok) {
+          const last = repro.steps[repro.steps.length - 1];
+          return await fail(
+            { paths, page, repro, reactions, timings, startedAt, since: stepStart, expectFixed, notes },
+            {
+              stepId: last?.id ?? 'assertion',
+              stepIndex: repro.steps.length - 1,
+              semantic: 'fix criterion',
+              expected: describeState(expected),
+              observed: `still not satisfied after ${FINAL_STATE_TIMEOUT_MS}ms:\n      ${outcome.unmet.join('\n      ')}`,
+            },
+          );
+        }
+      }
+    }
+
     const recurred = expectFixed
       ? checkBugRecurred(repro, reactions.network, reactions.console, baseUrl)
       : [];
@@ -304,7 +367,16 @@ export async function runRepro(repro: Repro, options: RunOptions = {}): Promise<
       );
     }
 
-    if (expectFixed && repro.steps.length >= 3 && notes.length >= Math.ceil(repro.steps.length / 2)) {
+    const lastStepDiverged =
+      notes.length > 0 && notes.some((n) => n.startsWith(`${repro.steps[repro.steps.length - 1]?.id} `));
+    if (
+      expectFixed &&
+      repro.steps.length >= 3 &&
+      // A single-shot repro diverges in exactly one step — the last one, which
+      // carries the assertion. Requiring most steps to diverge missed it every
+      // time, which is the only case that mattered.
+      (lastStepDiverged || notes.length >= Math.ceil(repro.steps.length / 2))
+    ) {
       // Most of the flow behaved nothing like the recording. That is what a
       // single-shot repro looks like on its second run — the state it depended
       // on already exists, so the bug cannot recur and the pass means nothing.
@@ -406,10 +478,13 @@ async function waitForFinalState(
 }
 
 function describeFinalState(repro: Repro): string {
-  const { domAppeared, domGone } = repro.assertion.finalState;
+  return describeState(repro.assertion.finalState);
+}
+
+function describeState(state: { domAppeared?: string[]; domGone?: string[] }): string {
   return [
-    ...(domAppeared ?? []).map((s) => `${s} to be present`),
-    ...(domGone ?? []).map((s) => `${s} to be gone`),
+    ...(state.domAppeared ?? []).map((s) => `${s} to be present`),
+    ...(state.domGone ?? []).map((s) => `${s} to be gone`),
   ].join(', ');
 }
 

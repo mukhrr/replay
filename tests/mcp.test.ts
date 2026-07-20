@@ -119,13 +119,34 @@ describe('mcp server', () => {
     }
   });
 
-  it('flips polarity under expect_fixed so green means fixed', async () => {
+  it('refuses to certify a fix when the repro states no criterion', async () => {
+    // A green here would mean "we checked nothing and it passed".
     await server.reset();
     const result = await call('repro_run', { name: 'checkout-crash', expect_fixed: true });
 
-    expect(result.structuredContent?.passed).toBe(true);
-    expect(result.content[0]?.text).toContain('expect-fixed');
-    expect(result.content[0]?.text).toMatch(/fix holds/i);
+    expect(result.isError).toBe(true);
+    const failure = result.structuredContent?.failure as Record<string, unknown>;
+    expect(failure.semantic).toBe('fix criterion');
+    expect(String(failure.observed)).toMatch(/expectedWhenFixed/);
+  });
+
+  it('flips polarity under expect_fixed so green means fixed', async () => {
+    await server.reset();
+    const { readFile, writeFile } = await import('node:fs/promises');
+    const irPath = path.join(root, '.repros/checkout-crash.json');
+    const original = await readFile(irPath, 'utf8');
+    const repro = JSON.parse(original);
+    repro.assertion.expectedWhenFixed = { domAppeared: ['[data-testid="report-result"]'] };
+    await writeFile(irPath, JSON.stringify(repro, null, 2));
+
+    try {
+      const result = await call('repro_run', { name: 'checkout-crash', expect_fixed: true });
+      expect(result.structuredContent?.passed).toBe(true);
+      expect(result.content[0]?.text).toContain('expect-fixed');
+      expect(result.content[0]?.text).toMatch(/fix holds/i);
+    } finally {
+      await writeFile(irPath, original);
+    }
   });
 
   it('explains a repro without re-running it', async () => {

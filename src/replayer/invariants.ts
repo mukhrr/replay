@@ -37,6 +37,18 @@ export interface InvariantViolation {
  * would otherwise never pass --expect-fixed, and a tool that cries wolf gets
  * turned off.
  */
+/** Does this repro record anything that could tell us the bug came back? */
+export function hasBugSignature(repro: Repro): boolean {
+  const observed = repro.assertion.observedAtRecord;
+  return Boolean(observed && (observed.consoleErrors.length || observed.failedRequests.length));
+}
+
+/** Has the author stated what must be true once it is fixed? */
+export function hasFixCriterion(repro: Repro): boolean {
+  const expected = repro.assertion.expectedWhenFixed;
+  return Boolean(expected && (expected.domAppeared?.length || expected.domGone?.length));
+}
+
 export function checkBugRecurred(
   repro: Repro,
   network: RawNetworkEvent[],
@@ -98,7 +110,12 @@ export function checkInvariants(
   if (repro.assertion.invariants.noFailedRequests) {
     const patterns = recordedPatterns(repro);
     for (const n of network) {
-      if (!n.failed || isIncidentalRequest(n.url)) continue;
+      // An aborted request is a cancellation — a navigation, an unmount, a
+      // user moving on — not a server failure. Counting it made a same-host
+      // telemetry beacon fail every replay, and host rules cannot catch that
+      // because it is served from the app's own API origin.
+      if (!n.failed || n.status === null || n.status < 400) continue;
+      if (isIncidentalRequest(n.url)) continue;
       const inScope = patterns.some(
         (p) =>
           p.method.toUpperCase() === n.method.toUpperCase() &&

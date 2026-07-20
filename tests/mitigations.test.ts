@@ -107,6 +107,9 @@ describe('single-shot warning', () => {
     for (const step of repro.steps) {
       step.waitAfter = { domAppeared: ['[data-testid="never-appears"]'], timeoutMs: 250 };
     }
+    // A stated criterion that IS met — so the run passes and the warning is the
+    // only thing standing between the developer and a meaningless green.
+    repro.assertion.expectedWhenFixed = { domAppeared: ['[data-testid="report-result"]'] };
     await writeFile(paths.ir, JSON.stringify(repro, null, 2));
 
     const result = await run({ name: 'single-shot', root, expectFixed: true });
@@ -123,10 +126,98 @@ describe('single-shot warning', () => {
     await recordFlow('healthy');
     await server.reset();
 
+    const paths = reproPaths('healthy', root);
+    const repro = await readRepro('healthy', root);
+    repro.assertion.expectedWhenFixed = { domAppeared: ['[data-testid="report-result"]'] };
+    await writeFile(paths.ir, JSON.stringify(repro, null, 2));
+
     const result = await run({ name: 'healthy', root, expectFixed: true });
 
     expect(result.passed).toBe(true);
     // Crying wolf on a good run would train people to ignore it.
     expect(result.notes.filter((n) => n.startsWith('WARNING:'))).toEqual([]);
+  });
+});
+
+describe('refusing to certify a fix it could not check', () => {
+  it('fails --expect-fixed when the repro records no way to tell fixed from broken', async () => {
+    // The v3 regression: step wait failures are downgraded to notes under this
+    // polarity (correct — a fix changes behaviour), and the only remaining gate
+    // read observedAtRecord, which the noise filter had correctly emptied. So a
+    // DOM-only bug — missing element, wrong number, broken layout — reported
+    // FIXED while the page was visibly still broken.
+    await recordFlow('no-criterion');
+    await server.reset();
+
+    const paths = reproPaths('no-criterion', root);
+    const repro = await readRepro('no-criterion', root);
+    repro.assertion.observedAtRecord = { consoleErrors: [], failedRequests: [] };
+    delete repro.assertion.expectedWhenFixed;
+    await writeFile(paths.ir, JSON.stringify(repro, null, 2));
+
+    const result = await run({ name: 'no-criterion', root, expectFixed: true });
+
+    expect(result.passed, 'must refuse rather than report a meaningless green').toBe(false);
+    expect(result.failure?.semantic).toBe('fix criterion');
+    expect(result.failure?.observed).toMatch(/expectedWhenFixed/);
+  });
+
+  it('passes when the stated fix criterion is met', async () => {
+    await recordFlow('criterion-met');
+    await server.reset();
+
+    const paths = reproPaths('criterion-met', root);
+    const repro = await readRepro('criterion-met', root);
+    repro.assertion.expectedWhenFixed = { domAppeared: ['[data-testid="report-result"]'] };
+    await writeFile(paths.ir, JSON.stringify(repro, null, 2));
+
+    const result = await run({ name: 'criterion-met', root, expectFixed: true });
+    expect(result.passed).toBe(true);
+  });
+
+  it('fails when the stated fix criterion is not met', async () => {
+    await recordFlow('criterion-unmet');
+    await server.reset();
+
+    const paths = reproPaths('criterion-unmet', root);
+    const repro = await readRepro('criterion-unmet', root);
+    repro.assertion.expectedWhenFixed = { domAppeared: ['text=Total spend'] };
+    await writeFile(paths.ir, JSON.stringify(repro, null, 2));
+
+    const result = await run({ name: 'criterion-unmet', root, expectFixed: true });
+
+    expect(result.passed).toBe(false);
+    expect(result.failure?.semantic).toBe('fix criterion');
+    expect(result.failure?.observed).toContain('Total spend');
+  });
+});
+
+describe('aborted requests', () => {
+  it('are not treated as server failures', async () => {
+    // A same-host telemetry beacon cancelled on navigation failed every replay.
+    // Host rules cannot catch it: it is served from the app's own API origin.
+    const { checkInvariants } = await import('../src/replayer/invariants.js');
+    const repro = await readRepro('healthy', root).catch(async () => {
+      await recordFlow('aborted-probe');
+      return readRepro('aborted-probe', root);
+    });
+
+    const violations = checkInvariants(
+      repro,
+      [
+        {
+          kind: 'network',
+          method: 'POST',
+          url: `${server.baseUrl}/api/fl?tracking=1`,
+          startedAt: 0,
+          settledAt: 1,
+          status: null,
+          failed: true,
+        },
+      ],
+      [],
+      server.baseUrl,
+    );
+    expect(violations).toEqual([]);
   });
 });

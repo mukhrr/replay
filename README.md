@@ -251,6 +251,18 @@ On failure it returns the failing step, a plain-language description of what tha
 Measured end to end over stdio: **one tool call, 3.15 s**. Driving a browser through an agent step by step costs a model round trip per action, and costs it again on every re-verification. This costs one, every time.
 
 ### Verifying a fix
+**A repro must say what "fixed" looks like.** `finalState` describes the *buggy* end state, so it cannot double as the fix criterion. For a bug that leaves no console error and no failed request — a missing element, a wrong number, a broken layout — there is otherwise nothing for `--expect-fixed` to check, and it would pass whether or not you fixed anything.
+
+So state it, once, by hand:
+
+```jsonc
+"assertion": {
+  "expectedWhenFixed": { "domAppeared": ["text=Total spend"] }
+}
+```
+
+Without one, and with no recorded console error or failed request to fall back on, `--expect-fixed` **fails** and tells you why. Reporting success after checking nothing is the worst thing a verification tool can do.
+
 
 `repro run` asserts the bug **still** reproduces — right for confirming a fresh repro is sound, backwards while you're fixing something. Pass `expect_fixed` (or `--expect-fixed` on the CLI) to invert it:
 

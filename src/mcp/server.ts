@@ -98,14 +98,31 @@ export function createServer(root = process.cwd()): McpServer {
             'True while verifying a fix: pass when the bug does NOT occur. False (default) asserts the bug still reproduces.',
           ),
         base_url: z.string().optional().describe('Override the recorded base URL.'),
+        headed: z
+          .boolean()
+          .optional()
+          .describe(
+            'Run in a visible browser. Required by apps that refuse headless sessions — without it those replays fail for reasons unrelated to the bug.',
+          ),
+        profile_dir: z
+          .string()
+          .optional()
+          .describe('Persistent Chromium profile directory, to reuse a login.'),
+        setup_command: z
+          .string()
+          .optional()
+          .describe('Shell command run before replay, to reset state the flow mutates.'),
       },
     },
-    async ({ name, expect_fixed = false, base_url }) => {
+    async ({ name, expect_fixed = false, base_url, headed, profile_dir, setup_command }) => {
       const result = await run({
         name,
         root,
         expectFixed: expect_fixed,
         captureFinalScreenshot: true,
+        ...(headed ? { headed: true } : {}),
+        ...(profile_dir ? { profileDir: profile_dir } : {}),
+        ...(setup_command ? { setupCommand: setup_command } : {}),
         ...(base_url ? { baseUrl: base_url } : {}),
       });
 
@@ -114,6 +131,9 @@ export function createServer(root = process.cwd()): McpServer {
       const networkLog = await tail(artifacts?.networkLog ?? null, 40);
 
       const content: Content[] = [{ type: 'text', text: summarize(result, expect_fixed) }];
+      // Notes carry the "this may be single-shot" warning, which is the only
+      // signal that a green verdict might mean nothing.
+      for (const note of result.notes) content.push({ type: 'text', text: note });
       if (consoleTail) content.push({ type: 'text', text: `Console errors:\n${consoleTail}` });
       if (networkLog) content.push({ type: 'text', text: `Network since last step:\n${networkLog}` });
       content.push(...(await imageContent(result.finalScreenshot)));

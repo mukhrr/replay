@@ -38,6 +38,10 @@ export function isStableToken(t: string): boolean {
   // They are regenerated on every page load, so they can never match on a
   // later run — a wait on one is guaranteed to time out.
   if (t.split(/[-_]/).some(looksGenerated)) return false;
+  // Live-region announcers (react-aria and friends) mint ids per page load and
+  // suffix them by role: `fvbiask-aria`, `rouspeg-diff`. The prefix is random
+  // but not always vowel-starved, so the suffix is the reliable tell.
+  if (/-(aria|diff|live|announcer|portal)$/i.test(t)) return false;
   return true;
 }
 
