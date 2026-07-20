@@ -92,12 +92,14 @@ export async function waitForReaction(ctx: WaitContext, waitAfter: WaitAfter): P
   for (const selector of waitAfter.domGone ?? []) {
     jobs.push({
       label: `gone ${selector}`,
-      // `first()` keeps this out of strict mode, and resolves immediately when
-      // nothing matches — which is exactly "already gone".
+      // `hidden` covers both ways an element goes away — unmounted, or still
+      // attached but no longer rendered. `detached` would hang forever on the
+      // second case. `first()` keeps this out of strict mode and resolves
+      // immediately when nothing matches, which is exactly "already gone".
       run: ctx.page
         .locator(selector)
         .first()
-        .waitFor({ state: 'detached', timeout })
+        .waitFor({ state: 'hidden', timeout })
         .then(() => undefined),
     });
   }

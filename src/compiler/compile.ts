@@ -154,9 +154,7 @@ export function deriveAssertion(steps: Step[], trace: RecordingTrace): Assertion
     if (last.waitAfter.network?.length) finalState.network = last.waitAfter.network;
   }
 
-  const consoleErrors = Array.prototype.slice.call(
-    new Set(trace.console.map((c) => c.text)),
-  ) as string[];
+  const consoleErrors = Array.from(new Set(trace.console.map((c) => c.text)));
 
   // Third-party failures are not this app's bug and must not disable the check.
   const failedRequests = trace.network
@@ -167,9 +165,9 @@ export function deriveAssertion(steps: Step[], trace: RecordingTrace): Assertion
       status: n.status,
     }));
 
-  const dedupedFailures = Array.prototype.slice.call(
+  const dedupedFailures = Array.from(
     new Map(failedRequests.map((f) => [`${f.method} ${f.urlPattern} ${f.status}`, f])).values(),
-  ) as typeof failedRequests;
+  );
 
   return {
     mode: 'expect-bug',

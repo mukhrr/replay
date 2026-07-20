@@ -41,6 +41,8 @@ export interface RunResult {
   name: string;
   passed: boolean;
   durationMs: number;
+  /** Total steps in the IR — `timings` only covers the ones that ran. */
+  totalSteps: number;
   timings: StepTiming[];
   failure: RunFailure | null;
   invariantViolations: InvariantViolation[];
@@ -193,6 +195,7 @@ export async function runRepro(repro: Repro, options: RunOptions = {}): Promise<
       name: repro.name,
       passed: true,
       durationMs: Date.now() - startedAt,
+      totalSteps: repro.steps.length,
       timings,
       failure: null,
       invariantViolations: [],
@@ -235,6 +238,7 @@ async function fail(
     name: ctx.repro.name,
     passed: false,
     durationMs: Date.now() - ctx.startedAt,
+    totalSteps: ctx.repro.steps.length,
     timings: ctx.timings,
     failure: { ...failure, artifacts },
     invariantViolations: violations,

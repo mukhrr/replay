@@ -1,0 +1,141 @@
+:root {
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f6f7f9;
+  color: #14181f;
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #dfe3e8;
+  padding-bottom: 12px;
+}
+
+.topbar h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+nav {
+  display: flex;
+  gap: 8px;
+}
+
+.navlink {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #4a5361;
+}
+
+.navlink.active {
+  background: #fff;
+  border-color: #dfe3e8;
+  color: #14181f;
+  font-weight: 600;
+}
+
+.panel {
+  margin-top: 24px;
+}
+
+.panel h2 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+
+.row,
+.form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+label {
+  font-size: 13px;
+  color: #4a5361;
+}
+
+input,
+select {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 10px;
+  border: 1px solid #cfd5dd;
+  border-radius: 6px;
+  background: #fff;
+}
+
+button {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid #cfd5dd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sensor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.toast {
+  margin-top: 16px;
+  background: #14181f;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.pending,
+.result {
+  margin-top: 16px;
+  background: #fff;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 14px;
+}

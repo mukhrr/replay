@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { Page } from 'playwright';
 import { compile } from './compiler/compile.js';
 import {
   listRepros,
@@ -22,6 +23,13 @@ export interface RecordOptions {
   /** Seed cookies/localStorage from an existing Playwright storageState file. */
   storageStatePath?: string | null;
   onReady?: () => void;
+  headless?: boolean;
+  /**
+   * Drive the browser programmatically instead of waiting for a human. The
+   * capture pipeline is identical either way — the seam Phase 1's `repro auto`
+   * hands to an LLM browser agent.
+   */
+  drive?: (page: Page) => Promise<void>;
 }
 
 export interface RecordResult {
@@ -47,6 +55,8 @@ export async function record(options: RecordOptions): Promise<RecordResult> {
     viewport: options.viewport,
     storageStatePath: options.storageStatePath ?? null,
     onReady: options.onReady,
+    headless: options.headless,
+    drive: options.drive,
   });
 
   await writeFileAtomic(paths.storageState, storageState);

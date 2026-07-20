@@ -22,10 +22,36 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
 };
 
 /**
- * Runs inside the page via `addInitScript`. Playwright serializes this with
- * `Function.prototype.toString`, so the body MUST be self-contained: it may not
- * reference any module-scope *value*. Type-only references are fine — they are
- * erased at compile time.
+ * Helpers that TS/JS transforms inject into compiled output. They live in
+ * module scope, which does not exist in the page, so a serialized function
+ * body that references one throws on its first line.
+ *
+ * esbuild's `keepNames` (on by default under tsx) rewrites every function
+ * declaration to `__name(fn, "…")`. Shimming these makes injection independent
+ * of whichever toolchain compiled us — tsc, esbuild, swc, dev or prod.
+ */
+const HELPER_SHIMS = `
+var __name = function (fn) { return fn; };
+var __publicField = function (obj, key, value) { obj[key] = value; return value; };
+var __defProp = Object.defineProperty;
+`;
+
+/**
+ * The exact source injected into the page: helper shims, then the agent applied
+ * to its config, all wrapped as one expression so it is valid both as an
+ * init-script body and as an `evaluate` argument.
+ */
+export function agentSource(config: AgentConfig): string {
+  return `(function () {${HELPER_SHIMS}(${pageAgent.toString()})(${JSON.stringify(config)});})()`;
+}
+
+/** Set once the agent has installed every listener; see `verifyInstrumentation`. */
+export const AGENT_READY_FLAG = '__replayAgentReady';
+
+/**
+ * Runs inside the page. Serialized with `Function.prototype.toString`, so the
+ * body MUST be self-contained: it may not reference any module-scope *value*.
+ * Type-only references are fine — they are erased at compile time.
  *
  * Only the top frame records. Selectors generated in a subframe would not
  * resolve against the main frame at replay time, and Phase 0 has no frame
@@ -272,7 +298,7 @@ export function pageAgent(config: AgentConfig): void {
   }
 
   function allElements(): Element[] {
-    return Array.prototype.slice.call(document.querySelectorAll('*')) as Element[];
+    return Array.from(document.querySelectorAll('*'));
   }
 
   /** Append `>> nth=N` only when the base selector is genuinely ambiguous. */
@@ -300,15 +326,12 @@ export function pageAgent(config: AgentConfig): void {
       }
 
       let seg = node.tagName.toLowerCase();
-      const classes = Array.prototype.slice
-        .call(node.classList)
-        .filter((c: string) => isStableClass(c))
-        .slice(0, 2) as string[];
+      const classes = Array.from(node.classList).filter(isStableClass).slice(0, 2);
       if (classes.length) seg += `.${classes.map(escId).join('.')}`;
 
       const parent: Element | null = node.parentElement;
       if (parent) {
-        const sameTag = (Array.prototype.slice.call(parent.children) as Element[]).filter(
+        const sameTag = Array.from(parent.children).filter(
           (c) => c.tagName === node.tagName,
         );
         if (sameTag.length > 1) seg += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
@@ -368,10 +391,25 @@ export function pageAgent(config: AgentConfig): void {
     return out.slice(0, 5);
   }
 
+  /**
+   * Text as rendered. `textContent` concatenates across element boundaries —
+   * a row reads "Sensor 2Delete" — whereas `innerText` respects layout and
+   * separates them.
+   */
+  function renderedText(el: Element, max = 80): string {
+    const inner = (el as HTMLElement).innerText;
+    return clean(typeof inner === 'string' ? inner : el.textContent, max);
+  }
+
   function contextLabel(el: Element): string {
     const row = el.closest('tr, [role="row"], li, [role="listitem"], [data-testid*="row"]');
     if (row && row !== el) {
-      const t = clean(row.textContent, 60);
+      // Strip the element's own label so the context names its surroundings,
+      // not the thing we already named: "the row containing Sensor 2", not
+      // "the row containing Sensor 2 Delete".
+      const own = renderedText(el, 60);
+      const full = renderedText(row, 120);
+      const t = clean(own ? full.split(own).join(' ') : full, 60);
       if (t) return ` in the row containing "${t}"`;
     }
     const section = el.closest('form, section, dialog, [role="dialog"], nav, main, aside');
@@ -467,9 +505,15 @@ export function pageAgent(config: AgentConfig): void {
       const gone = new Set<string>();
       const revealed: Element[] = [];
 
+      // Only elements that are actually rendered make usable appear-signals.
+      // An <option> inside a <select> has no layout box, so a replay waiting
+      // for it to become visible would hang until the step timed out.
+      const visibleAppearedSelector = (el: Element): string | null =>
+        isVisible(el) ? appearedSelector(el) : null;
+
       for (const rec of records) {
         if (rec.type === 'childList') {
-          harvest(rec.addedNodes, appeared, appearedSelector, revealed);
+          harvest(rec.addedNodes, appeared, visibleAppearedSelector, revealed);
           harvest(rec.removedNodes, gone, goneSelector, []);
         } else if (rec.type === 'attributes') {
           const el = rec.target as Element;
@@ -498,8 +542,8 @@ export function pageAgent(config: AgentConfig): void {
       if (appeared.size || gone.size) {
         emit({
           kind: 'dom',
-          appeared: Array.prototype.slice.call(appeared) as string[],
-          gone: Array.prototype.slice.call(gone) as string[],
+          appeared: Array.from(appeared),
+          gone: Array.from(gone),
           t: Date.now(),
         });
       }
@@ -573,6 +617,21 @@ export function pageAgent(config: AgentConfig): void {
     emitAction('fill', el, value);
   }
 
+  /**
+   * Commit an edit that is still sitting in the focused field before recording
+   * whatever the user just did instead.
+   *
+   * `change`/`blur` are the commit triggers, but they are not guaranteed to
+   * fire *before* the next action: programmatic drivers frequently move on
+   * without blurring, which would emit the fill after the action it preceded
+   * and put the IR out of order. This only fixes ordering — it never commits a
+   * value that change/blur would not have committed anyway.
+   */
+  function flushPendingFill(): void {
+    const active = document.activeElement;
+    if (active && isEditable(active)) commitFill(active);
+  }
+
   document.addEventListener(
     'focusin',
     (e) => {
@@ -587,6 +646,7 @@ export function pageAgent(config: AgentConfig): void {
     (e) => {
       const el = targetOf(e);
       if (!el) return;
+      flushPendingFill();
       flushRevealingHover(el);
       emitAction('click', el, null);
     },
@@ -598,6 +658,7 @@ export function pageAgent(config: AgentConfig): void {
     (e) => {
       const el = targetOf(e);
       if (!el) return;
+      flushPendingFill();
       emitAction('dblclick', el, null);
     },
     true,
@@ -612,6 +673,7 @@ export function pageAgent(config: AgentConfig): void {
       if (tag === 'select') {
         const sel = el as HTMLSelectElement;
         const opt = sel.selectedOptions[0];
+        flushPendingFill();
         flushRevealingHover(el);
         emitAction('select', el, opt ? opt.value || clean(opt.textContent) : sel.value);
         return;
@@ -685,11 +747,10 @@ export function pageAgent(config: AgentConfig): void {
         // Typing itself is captured as a single `fill` on commit.
         if (e.key !== 'Enter' && e.key !== 'Escape') return;
         commitFill(el);
-      } else if (
-        !MEANINGFUL_KEYS.includes(e.key) &&
-        !(e.ctrlKey || e.metaKey || e.altKey)
-      ) {
+      } else if (!MEANINGFUL_KEYS.includes(e.key) && !(e.ctrlKey || e.metaKey || e.altKey)) {
         return;
+      } else {
+        flushPendingFill();
       }
       emitAction('press', el, playwrightKey(e));
     },
@@ -729,4 +790,9 @@ export function pageAgent(config: AgentConfig): void {
     },
     true,
   );
+
+  // Last line on purpose: reaching it proves every listener above installed.
+  // A recording that silently captures nothing is the worst failure this tool
+  // could have, so the caller asserts on this flag.
+  w.__replayAgentReady = true;
 }

@@ -1,5 +1,10 @@
 import type { BrowserContext, Frame, Page } from 'playwright';
-import { DEFAULT_AGENT_CONFIG, pageAgent, type AgentConfig } from './instrument.js';
+import {
+  AGENT_READY_FLAG,
+  agentSource,
+  DEFAULT_AGENT_CONFIG,
+  type AgentConfig,
+} from './instrument.js';
 import { collectReactions, type ReactionCollector } from './reaction.js';
 import type {
   PageEvent,
@@ -82,7 +87,8 @@ export async function attachRecorder(
     stop('hotkey');
   });
 
-  await context.addInitScript(pageAgent, config);
+  const script = agentSource(config);
+  await context.addInitScript({ content: script });
 
   const watchPage = (page: Page): void => {
     page.on('framenavigated', (frame: Frame) => {
@@ -98,7 +104,7 @@ export async function attachRecorder(
   for (const page of context.pages()) {
     watchPage(page);
     try {
-      await page.evaluate(pageAgent, config);
+      await page.evaluate(script);
     } catch {
       // about:blank and cross-origin pages can refuse evaluation; the init
       // script will cover them on their next navigation.
@@ -128,6 +134,27 @@ export async function attachRecorder(
       context.off('page', watchPage);
     },
   };
+}
+
+/**
+ * Assert the page agent actually installed.
+ *
+ * The failure this guards against is silent and total: if the injected source
+ * throws on its first line — a build helper leaking into the serialized body is
+ * the classic cause — every listener is missing and the recording completes
+ * happily with zero steps. Better to refuse to record than to hand someone an
+ * empty repro they will trust.
+ */
+export async function verifyInstrumentation(page: Page): Promise<void> {
+  const ready = await page.evaluate(
+    (flag) => Boolean((window as unknown as Record<string, unknown>)[flag]),
+    AGENT_READY_FLAG,
+  );
+  if (ready) return;
+  throw new Error(
+    'Recorder instrumentation failed to install in the page. No actions would be captured.\n' +
+      'This usually means the injected agent threw — check the browser console for the first error.',
+  );
 }
 
 /** Path + query relative to baseUrl, defaulting to "/" for anything unparseable. */

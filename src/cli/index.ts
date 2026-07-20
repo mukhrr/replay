@@ -131,7 +131,9 @@ function reportFail(result: RunResult): void {
   if (!f) return;
 
   console.log('');
-  console.log(`  ${bold('Step')}      ${f.stepId} ${dim(`(step ${f.stepIndex + 1} of ${result.timings.length + 1})`)}`);
+  console.log(
+    `  ${bold('Step')}      ${f.stepId} ${dim(`(step ${f.stepIndex + 1} of ${result.totalSteps})`)}`,
+  );
   console.log(`  ${bold('Target')}    ${f.semantic}`);
   console.log(`  ${bold('Expected')}  ${f.expected}`);
   console.log(`  ${bold('Observed')}  ${f.observed}`);

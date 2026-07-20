@@ -35,7 +35,7 @@ export interface ReactionWindow {
 }
 
 function uniq(values: string[], max: number): string[] {
-  return Array.prototype.slice.call(new Set(values), 0, max) as string[];
+  return Array.from(new Set(values)).slice(0, max);
 }
 
 /**
