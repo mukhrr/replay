@@ -1,8 +1,18 @@
 # Changelog
 
-## 0.1.2 — 2026-07-21
+## 0.2.0 — 2026-07-21
 
 From a field report on a production app.
+
+### `repro run <name> --env <url>`
+
+Record where the bug lives, replay where the fix lives. Three things carry an origin and all three now move together: `goto` steps, the app's own network patterns, and the captured session. Doing it by hand meant rewriting every absolute pattern and the `origin` key of the storage-state file — a lot of JSON surgery for what is conceptually one substitution.
+
+`-u` remains the narrow version: it redirects navigation and nothing else. An absolute pattern like `https://staging.example.com/api/*` can never match a same-origin dev proxy, so `-u` alone leaves every network wait unsatisfiable.
+
+Sibling hosts are treated as the same app and move with it; third-party origins are left alone, since rewriting a CDN or analytics endpoint would point someone else's traffic at your dev server.
+
+### Fixes
 
 - **`goto` steps displayed the recorded URL, not the one they navigated to.** The override worked — verified with two servers, the recorded origin received nothing — but the step table showed the recorded URL, so a user retargeting a repro to their local build read the staging URL and concluded the run had gone to staging. Every run now prints the effective origin once, up front, and `goto` steps show where they actually went.
 - **A framework-synthesised click after keyboard activation is dropped.** React Native Web turns Enter/Space on a button into a click, so both were recorded; on replay the second fired after the first had already opened a modal and was intercepted by the overlay.

@@ -75,7 +75,11 @@ program
   .argument('<name>', 'name of the repro to replay')
   .option('--headed', 'watch the replay in a visible browser', false)
   .option('--expect-fixed', 'pass when the bug no longer happens — use while fixing', false)
-  .option('-u, --url <baseUrl>', 'override the recorded base URL')
+  .option('-u, --url <baseUrl>', 'override where to navigate, nothing else')
+  .option(
+    '--env <url>',
+    'replay against another deployment: moves goto steps, the app\'s network patterns and the captured session onto this origin',
+  )
   .option('--profile <dir>', 'replay against a persistent Chromium profile (reuses a login)')
   .option('--setup <command>', 'shell command to reset state before replaying')
   .option('--timeout-scale <n>', 'multiply every recorded wait; raise on slow machines', '1')
@@ -94,6 +98,7 @@ program
       name,
       headed: opts.headed,
       baseUrl: opts.url,
+      envUrl: opts.env ?? null,
       expectFixed: opts.expectFixed,
       profileDir: opts.profile ?? null,
       setupCommand: opts.setup ?? null,
@@ -103,7 +108,8 @@ program
     });
     // Stated before the verdict: a run against the wrong origin looks exactly
     // like a run against the right one until you know which it was.
-    console.log(dim(`  against ${result.baseUrl}${opts.url ? '  (overridden by -u)' : ''}`));
+    const via = opts.env ? '  (retargeted with --env)' : opts.url ? '  (overridden by -u)' : '';
+    console.log(dim(`  against ${result.baseUrl}${via}`));
     console.log('');
     result.passed ? reportPass(result) : reportFail(result);
     process.exitCode = result.passed ? 0 : 1;

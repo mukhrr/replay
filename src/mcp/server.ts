@@ -130,7 +130,13 @@ export function createReplayServer(root = process.cwd()): ReplayServer {
           .describe(
             'True while verifying a fix: pass when the bug does NOT occur. False (default) asserts the bug still reproduces.',
           ),
-        base_url: z.string().optional().describe('Override the recorded base URL.'),
+        base_url: z.string().optional().describe('Override where to navigate, nothing else.'),
+        env_url: z
+          .string()
+          .optional()
+          .describe(
+            "Replay against another deployment of the same app: moves goto steps, the app's own network patterns and the captured session onto this origin. Use this to verify a fix locally on a repro recorded against staging or production.",
+          ),
         headed: z
           .boolean()
           .optional()
@@ -151,7 +157,7 @@ export function createReplayServer(root = process.cwd()): ReplayServer {
           .describe('Multiply every recorded wait. Raise it when replaying somewhere slower than the machine that recorded.'),
       },
     },
-    async ({ name, expect_fixed = false, base_url, headed, profile_dir, setup_command, timeout_scale }) => {
+    async ({ name, expect_fixed = false, base_url, env_url, headed, profile_dir, setup_command, timeout_scale }) => {
       const result = await run({
         name,
         root,
@@ -164,6 +170,7 @@ export function createReplayServer(root = process.cwd()): ReplayServer {
         ...(setup_command ? { setupCommand: setup_command } : {}),
         ...(timeout_scale ? { timeoutScale: timeout_scale } : {}),
         ...(base_url ? { baseUrl: base_url } : {}),
+        ...(env_url ? { envUrl: env_url } : {}),
       });
 
       const artifacts = result.failure?.artifacts ?? null;
@@ -198,6 +205,7 @@ export function createReplayServer(root = process.cwd()): ReplayServer {
             : null,
           failureKind: result.failure?.kind ?? null,
           invariantViolations: result.invariantViolations,
+          baseUrl: result.baseUrl,
           screenshot: result.finalScreenshot,
         },
       };

@@ -1,5 +1,5 @@
 import { exec } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -23,6 +23,7 @@ import {
   TargetResolutionError,
   type ResolveTimeouts,
 } from './resolve.js';
+import { retargetRepro, retargetStorageState, type StorageState } from './retarget.js';
 import { createExpander, type Expander } from './values.js';
 import { waitForReaction } from './waits.js';
 
@@ -130,11 +131,22 @@ export interface RunOptions {
    * hand-edit and share, and one that can execute commands is a liability.
    */
   setupCommand?: string | null;
+  /**
+   * Replay this repro against a different deployment of the same app.
+   *
+   * Stronger than `baseUrl`, which only redirects navigation. This also moves
+   * the app's own network patterns and the captured session onto the new
+   * origin, so a repro recorded on staging runs against localhost without any
+   * hand-editing — the record-here, replay-there path the tool exists for.
+   */
+  envUrl?: string | null;
 }
 
-export async function runRepro(repro: Repro, options: RunOptions = {}): Promise<RunResult> {
+export async function runRepro(input: Repro, options: RunOptions = {}): Promise<RunResult> {
   const root = options.root ?? process.cwd();
-  const baseUrl = options.baseUrl ?? repro.baseUrl;
+  const recordedBaseUrl = input.baseUrl;
+  const repro = options.envUrl ? retargetRepro(input, options.envUrl) : input;
+  const baseUrl = options.envUrl ?? options.baseUrl ?? repro.baseUrl;
   const paths = reproPaths(repro.name, root);
   const expectFixed = options.expectFixed ?? false;
   // One expander per run: a named placeholder resolves identically across every
@@ -147,10 +159,21 @@ export async function runRepro(repro: Repro, options: RunOptions = {}): Promise<
     await execAsync(options.setupCommand);
   }
 
+  const sessionPath = options.profileDir ? null : storageStatePath(repro, root);
   const opened = await openBrowser({
     headless: !options.headed,
     viewport: repro.viewport,
-    storageStatePath: options.profileDir ? null : storageStatePath(repro, root),
+    storageStatePath: options.envUrl ? null : sessionPath,
+    // A session is origin-keyed, so restoring it unchanged would authenticate
+    // the environment it was recorded against and leave the target signed out.
+    storageState:
+      options.envUrl && sessionPath
+        ? (retargetStorageState(
+            JSON.parse(readFileSync(sessionPath, 'utf8')) as StorageState,
+            recordedBaseUrl,
+            options.envUrl,
+          ) as Record<string, unknown>)
+        : null,
     profileDir: options.profileDir ?? null,
     // A persistent profile owns its own process, so it cannot share one.
     browser: options.profileDir ? null : (options.browser ?? null),

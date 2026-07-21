@@ -3,6 +3,11 @@ import { compile, deriveAssertion } from '../src/compiler/compile.js';
 import { checkBugRecurred, checkInvariants } from '../src/replayer/invariants.js';
 import { isStableClass, isStableToken } from '../src/recorder/agent/text.js';
 import { isIncidentalRequest } from '../src/noise.js';
+import {
+  isSameApplication,
+  retargetRepro,
+  retargetStorageState,
+} from '../src/replayer/retarget.js';
 import { createExpander, hasPlaceholder } from '../src/replayer/values.js';
 import type { Repro } from '../src/ir/schema.js';
 import type { RawActionEvent, RecordingTrace } from '../src/recorder/types.js';
@@ -579,5 +584,91 @@ describe('pdu_html v3: click retargeted by a portal', () => {
     } finally {
       await browser.close();
     }
+  });
+});
+
+describe('--env retargeting', () => {
+  const STAGING = 'https://staging.new.example.com';
+  const LOCAL = 'https://dev.new.example.com:8082';
+
+  const base = (): Repro =>
+    ({
+      version: 1,
+      name: 'r',
+      createdAt: new Date(0).toISOString(),
+      baseUrl: STAGING,
+      startPath: '/home',
+      viewport: { width: 800, height: 600 },
+      storageStatePath: null,
+      steps: [
+        {
+          id: 's1',
+          action: 'click',
+          value: null,
+          target: { candidates: ['#x'], semantic: 'x' },
+          author: 'human',
+          waitAfter: {
+            timeoutMs: 3000,
+            network: [
+              // The app's API on a sibling host, and a genuine third party.
+              { urlPattern: 'https://staging.example.com/api/Save', method: 'POST' },
+              { urlPattern: 'https://cdn.other.com/track', method: 'GET' },
+              { urlPattern: '/api/Local', method: 'GET' },
+            ],
+          },
+        },
+      ],
+      assertion: {
+        mode: 'expect-bug',
+        finalState: {},
+        invariants: { noConsoleErrors: false, noFailedRequests: false },
+      },
+    }) as unknown as Repro;
+
+  it('strips the origin from the app’s own patterns so they match at the target', () => {
+    // An absolute staging pattern can never match a same-origin dev proxy, so
+    // every network wait recorded against staging failed locally.
+    const out = retargetRepro(base(), LOCAL);
+    const patterns = out.steps[0]!.waitAfter.network!.map((n) => n.urlPattern);
+    expect(patterns).toContain('/api/Save');
+    expect(patterns).toContain('/api/Local');
+  });
+
+  it('leaves third-party origins alone', () => {
+    // Rewriting these would point someone else's traffic at your dev server.
+    const out = retargetRepro(base(), LOCAL);
+    expect(out.steps[0]!.waitAfter.network!.map((n) => n.urlPattern)).toContain(
+      'https://cdn.other.com/track',
+    );
+  });
+
+  it('moves the session onto the target origin', () => {
+    // Cookies and localStorage are origin-keyed: restored unchanged, they
+    // authenticate the environment that was recorded and leave the target
+    // signed out, which reads as a bug in the app rather than the setup.
+    const moved = retargetStorageState(
+      {
+        cookies: [
+          { name: 'session', value: 'a', domain: '.example.com' },
+          { name: 'ads', value: 'b', domain: '.other.com' },
+        ],
+        origins: [
+          { origin: STAGING, localStorage: [{ name: 'k', value: 'v' }] },
+          { origin: 'https://cdn.other.com', localStorage: [] },
+        ],
+      },
+      STAGING,
+      LOCAL,
+    );
+
+    expect(moved.cookies!.find((c) => c.name === 'session')!.domain).toBe('dev.new.example.com');
+    expect(moved.cookies!.find((c) => c.name === 'ads')!.domain).toBe('.other.com');
+    expect(moved.origins!.map((o) => o.origin)).toEqual([LOCAL, 'https://cdn.other.com']);
+  });
+
+  it('treats sibling hosts as the same app and unrelated ones as third party', () => {
+    expect(isSameApplication('https://staging.example.com', STAGING)).toBe(true);
+    expect(isSameApplication('https://cdn.other.com', STAGING)).toBe(false);
+    expect(isSameApplication('http://localhost:3000', 'http://localhost:8080')).toBe(true);
   });
 });

@@ -43,10 +43,23 @@ Exit `0` on pass, `1` on fail. On failure you get the failing step, what it does
 | Flag | |
 |---|---|
 | `--expect-fixed` | pass when the bug no longer happens |
+| `--env <url>` | replay a repro recorded elsewhere against this deployment |
 | `--headed` | visible browser; some apps refuse headless |
 | `--storage-state <file>` / `--profile <dir>` | get past a login |
 | `--setup <cmd>` | reset state before replaying |
 | `--timeout-scale <n>` | multiply recorded waits, for a slower machine |
+
+### Record on staging, verify on localhost
+
+```bash
+repro record checkout-crash --url https://staging.example.com
+# fix the code, then:
+repro run checkout-crash --env http://localhost:3000 --expect-fixed
+```
+
+`--env` moves `goto` steps, the app's own network patterns and the captured session onto the target origin. Sibling hosts (`api.example.com`) move with the app; third-party origins are left alone.
+
+`-u` is the narrow version — it redirects navigation only, which leaves absolute network patterns unsatisfiable.
 
 ## From a coding agent
 
@@ -119,7 +132,7 @@ The CLI and MCP server are both thin wrappers over these.
 ## Develop
 
 ```bash
-npm test          # 110 tests, unit + real-browser integration
+npm test          # 117 tests, unit + real-browser integration
 npm run stress    # records once, replays 20x, fails on a single flake
 npm run demo      # examples/demo-app
 ```

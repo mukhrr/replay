@@ -1,5 +1,9 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
+type ContextStorageState = NonNullable<
+  NonNullable<Parameters<Browser['newContext']>[0]>['storageState']
+>;
+
 /**
  * Opening a browser is shared by recording and replay, and both need the same
  * two ways of getting an authenticated session.
@@ -24,6 +28,8 @@ export interface OpenBrowserOptions {
   headless: boolean;
   viewport: { width: number; height: number };
   storageStatePath?: string | null;
+  /** Pre-rewritten session, used when a repro is retargeted to another origin. */
+  storageState?: Record<string, unknown> | null;
   profileDir?: string | null;
   /**
    * Reuse an already-running browser instead of launching one.
@@ -68,9 +74,12 @@ export async function openBrowser(options: OpenBrowserOptions): Promise<OpenedBr
 
   const borrowed = Boolean(options.browser);
   const browser: Browser = options.browser ?? (await chromium.launch({ headless }));
+  // Playwright accepts either a path or the state itself; a retargeted repro
+  // supplies the latter because its origins were rewritten in memory.
+  const storageState = options.storageState ?? options.storageStatePath ?? undefined;
   const context = await browser.newContext({
     viewport,
-    ...(options.storageStatePath ? { storageState: options.storageStatePath } : {}),
+    ...(storageState ? { storageState: storageState as ContextStorageState } : {}),
   });
   const page = await context.newPage();
   return {
