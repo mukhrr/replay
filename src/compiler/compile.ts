@@ -140,32 +140,60 @@ export function compile(trace: RecordingTrace, options: CompileOptions): Repro {
   };
 }
 
-/**
- * Console errors plausibly caused by the recorded flow.
- *
- * Two filters. Ambient patterns are dropped outright. Anything logged before
- * the first user action is dropped too: it happened during boot, so it happens
- * on every run regardless of what the flow does, which makes it useless as a
- * signature for this particular bug.
- */
-function bugSignatureErrors(trace: RecordingTrace): string[] {
-  const firstAction = trace.actions[0]?.t ?? trace.startedAt;
-  return trace.console
-    .filter((c) => c.t >= firstAction)
-    .map((c) => c.text)
-    .filter((text) => !isAmbientConsoleError(text));
+/** An error is the flow's evidence only if it landed in some action's wake. */
+const REACTION_WINDOW_MS = 3_000;
+
+interface ConsoleSplit {
+  /** Errors plausibly caused by something the user did. */
+  signature: string[];
+  /** The app's own background chatter. */
+  ambient: string[];
 }
 
 /**
- * What the app logged to itself while booting, before the user acted.
+ * Separate the app's noise from the bug's evidence.
  *
- * Captured per repro because a static pattern list can never know an
- * individual app's noise. Subtracted at replay so the app's own chatter is
- * never mistaken for the bug.
+ * Splitting on "before the first action" was not stable: whether a boot error
+ * landed in one bucket or the other depended on how quickly the recording
+ * started clicking, so the same app and the same flow classified the same two
+ * errors differently from run to run — and a recording that happened to start
+ * fast treated boot chatter as the bug's signature.
+ *
+ * Causation is the stable question. Background noise fires whenever it fires;
+ * evidence of a bug fires in the wake of an action. Anything outside every
+ * action's reaction window is the app talking to itself, whenever it happened.
+ *
+ * The per-repro `ambient` list therefore holds only THIS app's own chatter.
+ * Noise common to every app is handled by the shared filter and never recorded
+ * here, so it cannot disable an otherwise dependable invariant.
  */
-function ambientErrors(trace: RecordingTrace): string[] {
-  const firstAction = trace.actions[0]?.t ?? trace.startedAt;
-  return Array.from(new Set(trace.console.filter((c) => c.t < firstAction).map((c) => c.text)));
+function splitConsole(trace: RecordingTrace): ConsoleSplit {
+  const signature: string[] = [];
+  const ambient: string[] = [];
+
+  for (const entry of trace.console) {
+    // Noise every app produces is filtered identically on both sides, so it
+    // needs no per-repro baseline and must not weaken the invariant.
+    if (isAmbientConsoleError(entry.text)) continue;
+    // With no actions there is no causation to reason about, and nothing to
+    // disprove attribution — so the error stands as evidence.
+    if (!trace.actions.length) {
+      signature.push(entry.text);
+      continue;
+    }
+    const inWake = trace.actions.some(
+      (a) => entry.t >= a.t && entry.t <= a.t + REACTION_WINDOW_MS,
+    );
+    (inWake ? signature : ambient).push(entry.text);
+  }
+
+  const ambientSet = new Set(ambient);
+  return {
+    // An error that also fires unprompted is noise even when it recurs after an
+    // action, so ambient always wins the tie.
+    signature: Array.from(new Set(signature)).filter((t) => !ambientSet.has(t)),
+    ambient: Array.from(ambientSet),
+  };
 }
 
 /**
@@ -205,8 +233,7 @@ export function deriveAssertion(steps: Step[], trace: RecordingTrace): Assertion
     if (last.waitAfter.network?.length) finalState.network = last.waitAfter.network;
   }
 
-  const consoleErrors = Array.from(new Set(bugSignatureErrors(trace)));
-  const ambientConsoleErrors = ambientErrors(trace);
+  const { signature: consoleErrors, ambient: ambientConsoleErrors } = splitConsole(trace);
 
   // Third-party failures are not this app's bug and must not disable the check.
   const failedRequests = trace.network

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — unreleased
+
+Third round in `pdu_html`. The 0.2.0 click fix targeted the wrong mechanism; the real one was found from an event trace.
+
+- **A click can name an element the user never touched.** When a menu opens on `pointerdown` and portals content over the cursor, `pointerup` lands on that new content and the browser dispatches the click on the nearest common ancestor — `<body>`, or `<html>` when the portal is a sibling of the trigger. `<html>` has no selector at all, so the gesture was dropped and the recording was silently missing a step. The recorder now falls back to the `pointerdown` target, which fires before any of that reshuffling. Reproduced with a real portal-over-cursor harness, not a stand-in.
+- **Console classification was nondeterministic.** Splitting on "before the first action" meant the same two errors landed in opposite buckets depending on how fast the recording started clicking — and a fast start treated the app's boot chatter as the bug's signature. Now split by causation: an error is evidence only if it lands in some action's reaction window. Noise common to every app is handled by the shared filter and kept out of the per-repro baseline entirely, so it cannot weaken an otherwise dependable invariant.
+
 ## 0.2.0 — unreleased
 
 Fixes from a second benchmark round in `pdu_html` (React 18 + Vite + Radix, hash-routed).

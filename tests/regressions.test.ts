@@ -444,6 +444,58 @@ describe('pdu_html v2: one gesture, one click', () => {
 });
 
 describe('pdu_html v2: flaky boot noise', () => {
+  it('classifies boot noise the same way however early the recording starts', () => {
+    // The reported nondeterminism: identical errors landed in opposite buckets
+    // depending on whether the driver clicked before or after they fired. One
+    // ordering treated the app's own chatter as the bug's signature.
+    const noise = 'Cannot download en.json file. Use fallback file.';
+    const early = deriveAssertion(
+      [],
+      trace({
+        actions: [action(1_000)],
+        console: [{ kind: 'console', text: noise, t: 9_000 }],
+      }),
+    );
+    const late = deriveAssertion(
+      [],
+      trace({
+        actions: [action(9_000)],
+        console: [{ kind: 'console', text: noise, t: 1_000 }],
+      }),
+    );
+    for (const a of [early, late]) {
+      expect(a.observedAtRecord?.ambientConsoleErrors).toEqual([noise]);
+      expect(a.observedAtRecord?.consoleErrors).toEqual([]);
+    }
+  });
+
+  it('still credits an error that lands in an action’s wake', () => {
+    const assertion = deriveAssertion(
+      [],
+      trace({
+        actions: [action(1_000)],
+        console: [{ kind: 'console', text: 'TypeError: boom', t: 1_400 }],
+      }),
+    );
+    expect(assertion.observedAtRecord?.consoleErrors).toEqual(['TypeError: boom']);
+    expect(assertion.observedAtRecord?.ambientConsoleErrors).toEqual([]);
+  });
+
+  it('treats an error that also fires unprompted as noise', () => {
+    const flaky = 'Cannot download en.json file.';
+    const assertion = deriveAssertion(
+      [],
+      trace({
+        actions: [action(5_000)],
+        console: [
+          { kind: 'console', text: flaky, t: 1_000 },
+          { kind: 'console', text: flaky, t: 5_200 },
+        ],
+      }),
+    );
+    expect(assertion.observedAtRecord?.consoleErrors).toEqual([]);
+  });
+
   it('does not infer a strict invariant from one lucky recording', () => {
     // The app logs "Cannot download en.json" on SOME loads. A recording that
     // happened to miss it inferred noConsoleErrors: true, and the next replay
@@ -481,5 +533,50 @@ describe('pdu_html v2: flaky boot noise', () => {
     const assertion = deriveAssertion([], trace({ actions: [action(1_000)] }));
     expect(assertion.invariants.noConsoleErrors).toBe(true);
     expect(assertion.observedAtRecord?.ambientConsoleErrors).toEqual([]);
+  });
+});
+
+describe('pdu_html v3: click retargeted by a portal', () => {
+  it('records the control the user aimed at, not the document root', async () => {
+    // Radix opens on pointerdown and portals content over the cursor, so
+    // pointerup lands elsewhere and the browser dispatches the click on the
+    // common ancestor — <body>, or <html> when the portal is a sibling. <html>
+    // has no selector at all, so the gesture disappeared from the recording.
+    const { chromium } = await import('playwright');
+    const { agentSource } = await import('../src/recorder/instrument.js');
+    const { DEFAULT_AGENT_CONFIG } = await import('../src/recorder/agent/config.js');
+
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const context = await browser.newContext();
+      const clicks: { target?: { candidates: string[] } }[] = [];
+      await context.exposeBinding(DEFAULT_AGENT_CONFIG.emitBinding, (_s, ev) => {
+        if ((ev as { action?: string }).action === 'click') {
+          clicks.push(ev as { target?: { candidates: string[] } });
+        }
+      });
+      const page = await context.newPage();
+      await page.setContent(`
+        <button id="trigger" style="position:absolute;top:20px;left:20px">
+          <span id="inner">Group by</span>
+        </button>
+        <script>
+          document.getElementById('trigger').addEventListener('pointerdown', () => {
+            const o = document.createElement('div');
+            o.style.cssText = 'position:fixed;inset:0;z-index:9999';
+            document.body.appendChild(o);
+          });
+        </script>`);
+      await page.evaluate(agentSource(DEFAULT_AGENT_CONFIG));
+
+      await page.click('#inner');
+      await new Promise((r) => setTimeout(r, 300));
+
+      expect(clicks, 'the gesture must not vanish').toHaveLength(1);
+      // Not "body" — the element the user actually pressed.
+      expect(clicks[0]?.target?.candidates[0]).toBe('#inner');
+    } finally {
+      await browser.close();
+    }
   });
 });

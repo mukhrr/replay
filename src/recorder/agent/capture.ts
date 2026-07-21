@@ -21,6 +21,14 @@ import type { Transport } from './transport.js';
  */
 const ECHO_WINDOW_MS = 30;
 
+/**
+ * How long a `pointerdown` stays eligible as the aim point of the click that
+ * follows it. A click is dispatched milliseconds after its pointerdown; this is
+ * generous enough to cover a slow frame and far too short to pair up two
+ * separate gestures.
+ */
+const GESTURE_WINDOW_MS = 1_000;
+
 /** Keys that carry meaning outside a text field. */
 const MEANINGFUL_KEYS = [
   'Enter',
@@ -90,6 +98,34 @@ export function installCapture(ctx: CaptureContext): void {
    * than a duplicate, because nothing in the artifact shows it happened.
    */
   let lastRecorded: { el: Element; t: number } | null = null;
+  let lastPointerDown: { el: Element; t: number } | null = null;
+
+  /**
+   * What the user actually aimed at.
+   *
+   * When a menu or dialog opens on `pointerdown` and portals content over the
+   * cursor, `pointerup` lands on that new content and the browser dispatches
+   * the click on the nearest common ancestor of the two — `<body>`, or `<html>`
+   * when the portal is a sibling of the trigger. The click event then names an
+   * element the user never touched, and for `<html>` there is no usable
+   * selector at all, so the gesture is dropped and the recording is silently
+   * missing a step.
+   *
+   * `pointerdown` fires before any of that reshuffling, so its target is the
+   * one thing in the sequence that reliably identifies the control.
+   */
+  function resolveGestureTarget(clicked: Element): Element {
+    const pd = lastPointerDown;
+    if (!pd || pd.el === clicked) return clicked;
+    if (Date.now() - pd.t > GESTURE_WINDOW_MS) return clicked;
+    const retargeted = clicked === document.documentElement || clicked === document.body;
+    // Only trust the aim point if it is still addressable; a control that
+    // unmounted on open tells us nothing replay could act on.
+    if (retargeted && pd.el.isConnected && describe(pd.el)) return pd.el;
+    // The click target may also simply have no selector of its own.
+    if (!describe(clicked) && pd.el.isConnected && describe(pd.el)) return pd.el;
+    return clicked;
+  }
 
   function isEchoOfRecordedClick(el: Element): boolean {
     const prev = lastRecorded;
@@ -168,9 +204,15 @@ export function installCapture(ctx: CaptureContext): void {
     if (el) reveals.noteHover(el);
   });
 
-  on('click', (e) => {
+  on('pointerdown', (e) => {
     const el = targetOf(e);
-    if (!el) return;
+    if (el) lastPointerDown = { el, t: Date.now() };
+  });
+
+  on('click', (e) => {
+    const clicked = targetOf(e);
+    if (!clicked) return;
+    const el = resolveGestureTarget(clicked);
     if (isEchoOfRecordedClick(el)) return;
     flushPendingFill();
     flushRevealingHover(el);
