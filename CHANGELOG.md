@@ -73,7 +73,7 @@ A flow that mutates server state can't be replayed as recorded — run two finds
 ### Other
 
 - Agent split from one 740-line closure into ten modules, which immediately made the `text=` bug findable
-- `prepare` script so `npm i github:mukhrr/replay` self-builds
+- `prepare` script so `npm i github:mukhrr/fast-replay` self-builds
 - `commander@14` pinned so the declared `node >= 20` is honest and it installs under `engine-strict`
 - MCP gained `headed` (apps that refuse headless were unusable without it), `profile_dir`, `setup_command`, and `REPLAY_ROOT`
 - MCP holds one browser across calls instead of launching per verification — 3% on the demo app, expected to be more on a large bundle, unverified
