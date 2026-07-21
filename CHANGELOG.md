@@ -1,37 +1,14 @@
 # Changelog
 
-## 0.2.2 — 2026-07-21
+## 0.1.0 — 2026-07-21
 
-First published release. Versions below were developed but never published.
-
-- **A CSS path unique only by sibling position now ranks below the text anchor.** `div:nth-of-type(3) > span:nth-of-type(2)` breaks the moment anything is inserted or reordered above it, which on a list or nav is routine; visible text is not durable either, but it survives a reshuffle. A path anchored on an attribute or a stable class still wins.
-
-**0.2.1 validated in `pdu_html`:** clicks issued 6/6 recorded on a real Radix `DismissableLayer` (the same retarget-to-`<html>` trace that used to drop the gesture), **zero hand-edits** to first replay, and all four verdicts flipping correctly — the first time that test has run to completion. Console classification identical across a fast-start and a slow-start recording.
-
-## 0.2.1 — unreleased
-
-Third round in `pdu_html`. The 0.2.0 click fix targeted the wrong mechanism; the real one was found from an event trace.
-
-- **A click can name an element the user never touched.** When a menu opens on `pointerdown` and portals content over the cursor, `pointerup` lands on that new content and the browser dispatches the click on the nearest common ancestor — `<body>`, or `<html>` when the portal is a sibling of the trigger. `<html>` has no selector at all, so the gesture was dropped and the recording was silently missing a step. The recorder now falls back to the `pointerdown` target, which fires before any of that reshuffling. Reproduced with a real portal-over-cursor harness, not a stand-in.
-- **Console classification was nondeterministic.** Splitting on "before the first action" meant the same two errors landed in opposite buckets depending on how fast the recording started clicking — and a fast start treated the app's boot chatter as the bug's signature. Now split by causation: an error is evidence only if it lands in some action's reaction window. Noise common to every app is handled by the shared filter and kept out of the per-repro baseline entirely, so it cannot weaken an otherwise dependable invariant.
-
-## 0.2.0 — unreleased
-
-Fixes from a second benchmark round in `pdu_html` (React 18 + Vite + Radix, hash-routed).
-
-- **A menu trigger's click could be recorded zero times.** Echo suppression was tracked against the last click *seen*; if that one was dropped for having no usable selector, the real click was suppressed as its echo and the gesture vanished from the artifact entirely. Now tracked against the last click *recorded*, so a gesture can never net zero. Same-element synthetic re-dispatch (how Radix and MUI primitives open menus) is also collapsed, while two genuine clicks on one button stay two.
-- **A flaky boot error silently flipped an invariant.** An error the app logs on *some* loads was absent from one recording, so the compiler inferred "clean app" and enabled the strictest check — which then failed the next replay. Boot-time output is now captured per repro as `observedAtRecord.ambientConsoleErrors`, subtracted at replay, and a strict invariant is no longer inferred from a single quiet recording.
-- **`repro run` could not detect a fix for absence-bugs.** The recorded `finalState` says what vanished, never what wrongly failed to appear, so it stayed satisfied after a fix. When `expectedWhenFixed` is present, plain `run` now asserts its inverse.
-- `--version` reports the real version. Two builds both saying `0.1.0` could only be told apart by grepping `dist/`.
-
-## 0.1.0 — unreleased
-
-First working version. Record a browser bug once, verify the fix in seconds.
+First release.
 
 ### What it does
 
 - **`repro record <name>`** — instrumented Chromium, click the bug once, writes `.repros/<name>.json`
 - **`repro run <name>`** — replays headless at machine speed, pass/fail with the failing step
+- **`repro run <name> --expect-fixed`** — passes when the bug no longer happens
 - **`repro list`** — repros with last result and age
 - **`repro-mcp`** — MCP server, so Claude Code / Codex / Gemini / Cursor verify a fix in one tool call
 - Programmatic `record()` / `run()` / `list()`; the CLI and MCP server are both thin wrappers
@@ -42,18 +19,19 @@ A 10-step flow replays in **2.7s**, 20/20 consecutive runs, zero model calls.
 
 - **The IR is JSON, not generated code.** Readable, hand-editable, patchable in place.
 - **Waits come from observed signals, never sleeps.** Network settling, DOM appearing/disappearing — a step proceeds the instant the app reacts. Timeouts are derived from what was measured, not fixed.
-- **Selectors are a candidate ladder**: test id → ARIA role + accessible name → stable CSS path → text anchor, with `>> nth=` only where genuinely ambiguous.
+- **Selectors are a candidate ladder**: test id → `name` → ARIA role + accessible name → labelled ancestor → stable CSS path → text anchor, with `>> nth=` only where genuinely ambiguous.
 - **The tool never calls a model.** It observes; your agent reasons. Screenshots return as inline image content so the model sees the page rather than a file path.
+- **It refuses to answer rather than guess.** `--expect-fixed` fails when the repro records nothing that could distinguish fixed from broken, and a replay that could not drive the app reports `COULD NOT VERIFY`, never `NOT FIXED`.
 
-### Built for Phase 1 from the start
+### Designed so agent-authored repros bolt on
 
-`attachRecorder()` works on any context (hybrid takeover), `record()` takes a `drive(page)` callback (agent-authored repros produce identical IR), the replayer's step-failure path is a hook (LLM re-grounding), IR writes are atomic, and every step carries `author: "human" | "agent"`.
+`attachRecorder()` works on any context (hybrid takeover), `record()` takes a `drive(page)` callback (agent-driven recording produces identical IR), the replayer's step-failure path is a hook (LLM re-grounding), IR writes are atomic, and every step carries `author: "human" | "agent"`.
 
 ---
 
 ## What real codebases changed
 
-The tool was built against a demo app, then run against Expensify (React Native Web, issue #96419) three times. Every round found defects that had passed cleanly on the demo app. These are the ones worth knowing about.
+The tool was built against a demo app, then benchmarked six times against two production codebases — Expensify (React Native Web) and a React + Vite + Radix app. Every round found defects that had passed cleanly on the demo app. Sixteen in total; these are the ones worth knowing about.
 
 ### Silent failures — the whole category
 
@@ -100,6 +78,16 @@ A flow that mutates server state can't be replayed as recorded — run two finds
 - MCP gained `headed` (apps that refuse headless were unusable without it), `profile_dir`, `setup_command`, and `REPLAY_ROOT`
 - MCP holds one browser across calls instead of launching per verification — 3% on the demo app, expected to be more on a large bundle, unverified
 - `--resolve-timeout` for slow-booting SPAs; partial IR written when a driver throws mid-flow
+
+### Portals, layout probes and a wrong fix
+
+The second codebase broke the *recorder* in ways the first never could.
+
+- **A layout probe became step zero.** `element-resize-detector` scrolls an offscreen element during layout; it was recorded as a user action and ordered *before* the navigation that created the page, so its selector could never resolve and step one failed in every recording.
+- **A menu trigger's click could be recorded zero times.** Not the duplicate it looked like: only one click event fires, and when a menu opens on `pointerdown` and portals content over the cursor, the browser dispatches that click on the common ancestor of the down and up targets — `<html>`, which has no selector. The recorder now falls back to the `pointerdown` target, which fires before any of the reshuffling. My first fix for this addressed a mechanism I had inferred from my own code rather than observed; it was wrong, and an event trace from the app showed why.
+- **Console classification was nondeterministic.** Splitting boot noise from bug evidence on *timing* meant the same two errors landed in opposite buckets depending on how fast the recording started clicking — and a fast start treated the app's own chatter as the bug's signature. Now split on causation: an error counts as evidence only if it lands in the wake of an action.
+- **`repro run` could not detect a fix for absence-bugs.** A recorded end state names what vanished, never what wrongly failed to appear, so it stayed satisfied after a fix. When `expectedWhenFixed` is present, plain `run` now asserts its inverse.
+- Hash fragments are part of the address. `pathOf` returned pathname and query only, so a recording at `/app.html#/sensors` replayed against `/app.html`.
 
 ---
 
