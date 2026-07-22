@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 — 2026-07-22
+
+- **Clicks now target the control, not its label.** A card-style option — icon plus text inside a pressable wrapper — put the cursor over the label, so that is what the click event named. Component libraries routinely set `pointer-events: none` on text, and Playwright then reports the parent "intercepts pointer events" and retries until it times out. Reproduced exactly: 60 retries, then failure. The recorder now recognises the wrapper (`role`, `tabindex`, `data-focusable`, `onclick`) and selects it by its own visible text — `div[data-focusable="true"]:has-text("Household expenses")` — which clicks first time whether or not the label is transparent to the pointer.
+
 ## 0.4.0 — 2026-07-21
 
 The rest of the field report.

@@ -26,7 +26,19 @@ const TEST_ID_ATTRS = [
   'data-sentry-label',
   'data-testid-label',
 ];
-const MAX_CANDIDATES = 5;
+const MAX_CANDIDATES = 6;
+
+/**
+ * Elements that handle a click themselves.
+ *
+ * `data-focusable` is React Native Web's marker for a pressable, and `tabindex`
+ * is how any framework makes a plain div operable. Both are far more common in
+ * a component library than a `<button>` element.
+ */
+const INTERACTIVE =
+  'button, a[href], [role="button"], [role="link"], [role="menuitem"], [role="menuitemradio"], ' +
+  '[role="option"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], ' +
+  '[tabindex], [data-focusable="true"], [onclick]';
 const MAX_CSS_PATH_DEPTH = 6;
 
 export function testIdSelector(el: Element): string | null {
@@ -159,6 +171,11 @@ export function buildCandidates(el: Element): string[] {
     push(withNth(roleName, el, matches));
   }
 
+  // The control that handles the click, when the cursor was over its label.
+  // Ranked here because acting on the control is more faithful than acting on
+  // a text node that merely happens to sit inside it.
+  for (const selector of interactiveHostSelectors(el)) push(selector);
+
   // Ranked above the CSS path on purpose: when a click lands on an inner node
   // of a labelled control, `[data-testid="x"]` is strictly more durable than
   // `[data-testid="x"] > span` or a chain of :nth-of-type positions.
@@ -185,6 +202,54 @@ export function buildCandidates(el: Element): string[] {
   }
 
   return out.slice(0, MAX_CANDIDATES);
+}
+
+/**
+ * Selectors for the control the click will actually be handled by.
+ *
+ * A card-style option — an icon and a label inside a pressable wrapper — puts
+ * the cursor over the label, so that is what the click event names. Targeting
+ * the label works only as long as the click reaches the wrapper: text nodes in
+ * a component library are routinely `pointer-events: none`, and a wrapper is
+ * the thing that keeps its identity when the label's markup changes.
+ */
+function interactiveHostSelectors(el: Element): string[] {
+  let host: Element | null = null;
+  try {
+    const found = el.closest(INTERACTIVE);
+    host = found && found !== el ? found : null;
+  } catch {
+    host = null;
+  }
+  if (!host) return [];
+
+  const out: string[] = [];
+  const push = (s: string | null): void => {
+    if (s && out.indexOf(s) === -1) out.push(s);
+  };
+
+  push(testIdSelector(host));
+  push(idSelector(host));
+  push(roleNameSelector(host));
+
+  // Nothing identifies it, so name it by the control's own visible text. A
+  // wrapper that contains the label is exactly what `:has-text` selects, and it
+  // survives the label being re-wrapped or restyled.
+  const label = renderedText(host, 60);
+  if (label) {
+    const tag = host.tagName.toLowerCase();
+    const role = host.getAttribute('role');
+    const qualifier = host.getAttribute('data-focusable')
+      ? '[data-focusable="true"]'
+      : role
+        ? `[role="${escAttr(role)}"]`
+        : host.hasAttribute('tabindex')
+          ? `[tabindex="${escAttr(host.getAttribute('tabindex') ?? '0')}"]`
+          : '';
+    if (qualifier) push(`${tag}${qualifier}:has-text("${escAttr(label)}")`);
+  }
+
+  return out;
 }
 
 /** True when the selector's uniqueness rests entirely on :nth-of-type. */

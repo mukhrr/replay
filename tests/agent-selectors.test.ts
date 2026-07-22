@@ -216,6 +216,37 @@ describe('candidate generation', () => {
     if (text >= 0) expect(css).toBeLessThan(text);
   });
 
+  it('targets the control that handles the click, not its label', async () => {
+    // A card-style option: icon plus label inside a pressable wrapper. The
+    // cursor is over the label, so that is what the click event names — but
+    // component libraries routinely set `pointer-events: none` on text, and
+    // Playwright then reports the parent "intercepts pointer events" and
+    // retries until it times out. Acting on the wrapper avoids the whole
+    // question and survives the label being re-wrapped.
+    const candidates = await ask(
+      `<div role="dialog">
+         <div class="card" tabindex="0" data-focusable="true">
+           <div><img src="data:image/svg+xml,<svg/>" alt=""></div>
+           <div><div dir="auto" style="pointer-events:none">Household expenses</div></div>
+         </div>
+       </div>`,
+      'div[dir="auto"]',
+      'buildCandidates',
+    );
+    expect(candidates[0]).toBe('div[data-focusable="true"]:has-text("Household expenses")');
+  });
+
+  it('prefers a test id on the control over its text', async () => {
+    const candidates = await ask(
+      `<div data-testid="track-household" tabindex="0">
+         <div><span>Household expenses</span></div>
+       </div>`,
+      'span',
+      'buildCandidates',
+    );
+    expect(candidates[0]).toBe('[data-testid="track-household"]');
+  });
+
   it('anchors a CSS path on the nearest test id ancestor', async () => {
     // Two structurally identical rows, so the path stays ambiguous until it
     // reaches something addressable.
