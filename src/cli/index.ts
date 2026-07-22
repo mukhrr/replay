@@ -6,6 +6,7 @@ import {
   deleteRepro,
   fixRepro,
   list,
+  openSession,
   PartialRecordingError,
   readRepro,
   record,
@@ -125,6 +126,45 @@ program
     console.log('');
     result.passed ? reportPass(result) : reportFail(result);
     process.exitCode = result.passed ? 0 : 1;
+  });
+
+program
+  .command('watch')
+  .argument('<name>', 'name of the repro to replay')
+  .option('--expect-fixed', 'pass when the bug no longer happens', false)
+  .option('--headed', 'watch the replay in a visible browser', false)
+  .option('--env <url>', 'replay against another deployment')
+  .option('--setup <command>', 'shell command to reset state before each replay')
+  .description('hold the browser open and replay on demand — for a fix-verify loop')
+  .action(async (name: string, opts) => {
+    const session = await openSession({ name, headed: opts.headed });
+    let runs = 0;
+
+    const once = async (): Promise<void> => {
+      const result = await run({
+        name,
+        expectFixed: opts.expectFixed,
+        envUrl: opts.env ?? null,
+        setupCommand: opts.setup ?? null,
+        session,
+      });
+      runs++;
+      result.passed ? reportPass(result) : reportFail(result);
+      console.log('');
+      console.log(dim(`  run ${runs} — press Enter to replay, Ctrl-C to stop`));
+    };
+
+    console.log(dim('  Holding the browser open so the app stays warm between replays.'));
+    console.log(dim('  State carries over; use --setup if this flow changes anything.'));
+    console.log('');
+    await once();
+
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    for await (const _ of process.stdin) {
+      await once().catch((err: Error) => console.error(`${red('✗')} ${err.message}`));
+    }
+    await session.close();
   });
 
 program

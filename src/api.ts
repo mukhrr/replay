@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Page } from 'playwright';
+import { openBrowser } from './browser.js';
 import { compile } from './compiler/compile.js';
 import {
   listRepros,
@@ -97,6 +99,39 @@ export async function record(options: RecordOptions): Promise<RecordResult> {
 
 export interface RunReproOptions extends RunOptions {
   name: string;
+}
+
+export interface WarmSession {
+  context: import('playwright').BrowserContext;
+  page: import('playwright').Page;
+  close(): Promise<void>;
+}
+
+/**
+ * A browser held open across replays.
+ *
+ * A fresh context boots the app from a cold cache every time, which on a heavy
+ * single-page app costs several times the replay itself. Holding one open keeps
+ * the HTTP and V8 caches warm — measured at 81% off page load even on a trivial
+ * app, and the gap widens with the size of the bundle.
+ *
+ * It trades isolation for speed, so it belongs in a fix-verify loop a person is
+ * watching, not in a verification that has to stand on its own.
+ */
+export async function openSession(options: {
+  name: string;
+  root?: string;
+  headed?: boolean;
+}): Promise<WarmSession> {
+  const root = options.root ?? process.cwd();
+  const repro = await readRepro(options.name, root);
+  const paths = reproPaths(options.name, root);
+  const opened = await openBrowser({
+    headless: !options.headed,
+    viewport: repro.viewport,
+    storageStatePath: existsSync(paths.storageState) ? paths.storageState : null,
+  });
+  return { context: opened.context, page: opened.page, close: opened.close };
 }
 
 /** Replay a recorded repro. Reads and validates the IR, then drives the browser. */

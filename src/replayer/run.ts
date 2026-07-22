@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { Browser, Page } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import { openBrowser } from '../browser.js';
 import type { Repro, Step, Target } from '../ir/schema.js';
 import { reproPaths, type ReproPaths } from '../ir/io.js';
@@ -135,6 +135,17 @@ export interface RunOptions {
    */
   setupCommand?: string | null;
   /**
+   * Reuse an already-open page instead of creating one.
+   *
+   * A fresh context boots the app from a cold cache every run, which on a heavy
+   * single-page app costs far more than the replay itself. Reusing the page
+   * keeps the HTTP and V8 caches warm. The cost is isolation: state carries
+   * over between runs, so a flow that mutates anything needs `--setup`. Meant
+   * for a human sitting in a fix-verify loop, not for a verification that has
+   * to stand on its own.
+   */
+  session?: { context: BrowserContext; page: Page } | null;
+  /**
    * Replay this repro against a different deployment of the same app.
    *
    * Stronger than `baseUrl`, which only redirects navigation. This also moves
@@ -163,7 +174,10 @@ export async function runRepro(input: Repro, options: RunOptions = {}): Promise<
   }
 
   const sessionPath = options.profileDir ? null : storageStatePath(repro, root);
-  const opened = await openBrowser({
+  const reused = options.session ?? null;
+  const opened = reused
+    ? { context: reused.context, page: reused.page, persistent: false, close: async () => {} }
+    : await openBrowser({
     headless: !options.headed,
     viewport: repro.viewport,
     storageStatePath: options.envUrl ? null : sessionPath,
@@ -177,14 +191,16 @@ export async function runRepro(input: Repro, options: RunOptions = {}): Promise<
             options.envUrl,
           ) as Record<string, unknown>)
         : null,
-    profileDir: options.profileDir ?? null,
-    // A persistent profile owns its own process, so it cannot share one.
-    browser: options.profileDir ? null : (options.browser ?? null),
-  });
+        profileDir: options.profileDir ?? null,
+        // A persistent profile owns its own process, so it cannot share one.
+        browser: options.profileDir ? null : (options.browser ?? null),
+      });
 
+  let reactionsRef: ReturnType<typeof collectReactions> | null = null;
   try {
     const { context, page } = opened;
     const reactions = collectReactions(context);
+    reactionsRef = reactions;
 
     await page.goto(new URL(repro.startPath, baseUrl).toString(), {
       waitUntil: 'domcontentloaded',
@@ -525,6 +541,9 @@ export async function runRepro(input: Repro, options: RunOptions = {}): Promise<
       invariantViolations: [],
     };
   } finally {
+    // Listeners are per-run. A fresh context discards them with itself, but a
+    // reused one would accumulate a set on every replay.
+    reactionsRef?.detach();
     await opened.close();
   }
 }

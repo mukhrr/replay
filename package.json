@@ -1,6 +1,6 @@
 {
   "name": "fast-replay",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Record a browser bug once, verify the fix in seconds. A deterministic eye for coding agents.",
   "type": "module",
   "license": "MIT",

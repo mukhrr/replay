@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 — 2026-07-22
+
+### `repro watch`
+
+Every `repro run` opened a fresh browser context, so the app booted from a cold cache each time. On a heavy single-page app that boot costs several times the replay itself, which made the loop feel slow even though the replay was not.
+
+`repro watch <name>` holds the browser open and replays on Enter, keeping the HTTP and V8 caches warm. Measured at 81% off page load and 5% off a whole replay on the demo app — where boot is only ~70 ms. The saving is proportional to how long the app takes to boot, so it should dominate on a real one; that part is unverified from here.
+
+It trades isolation for speed, so it is for a fix-verify loop a person is watching, not for a verification that must stand on its own. Pair it with `--setup` if the flow mutates state.
+
+Reaction listeners are now detached at the end of each run. A fresh context discarded them with itself; a reused one would have gathered a set per replay and counted the same console error several times over.
+
 ## 0.5.0 — 2026-07-22
 
 ### Replay refuses to act on the wrong record

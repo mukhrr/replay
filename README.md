@@ -36,8 +36,11 @@ repro record checkout-crash --url http://localhost:3000   # click the bug once
 repro run checkout-crash                                  # bug still reproduces?
 repro run checkout-crash --expect-fixed                   # did my fix work?
 repro list
+repro watch checkout-crash --expect-fixed                 # fix-verify loop
 repro rm checkout-crash                                   # once it's fixed
 ```
+
+`repro watch` holds the browser open and replays on Enter. Every `repro run` otherwise boots the app from a cold cache, which on a heavy single-page app costs several times the replay itself. It trades isolation for speed — state carries over between replays, so pair it with `--setup` if your flow changes anything.
 
 **Delete a repro when its bug is fixed.** That is what makes this different from a test suite: a repro captures one bug and is finished the moment that bug is gone. Left behind, it rots against a moving app and becomes a test nobody meant to write. `repro run --expect-fixed` reminds you, and the MCP server exposes `repro_delete` so an agent can clean up after verifying its own fix.
 

@@ -377,3 +377,41 @@ describe('focus assertions (WCAG 2.4.3)', () => {
     expect(fixed[fixed.length - 1]).toBe('[data-testid="opener"]');
   });
 });
+
+describe('held-open session', () => {
+  it('replays correctly more than once against the same page', async () => {
+    const { openSession } = await import('../src/api.js');
+    await recordFlow('warm');
+    const session = await openSession({ name: 'warm', root });
+    try {
+      for (let i = 0; i < 3; i++) {
+        await server.reset();
+        const result = await run({ name: 'warm', root, session });
+        expect(result.passed, `replay ${i + 1} of 3`).toBe(true);
+      }
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('does not accumulate listeners across replays', async () => {
+    // Reaction listeners are attached per run. A fresh context throws them away
+    // with itself; a reused one would gather a set on every replay, so the same
+    // console error would be counted three times over and could trip an
+    // invariant that nothing actually violated.
+    const { openSession } = await import('../src/api.js');
+    await recordFlow('warm-listeners');
+    const session = await openSession({ name: 'warm-listeners', root });
+    try {
+      const counts: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        await server.reset();
+        await run({ name: 'warm-listeners', root, session });
+        counts.push(session.context.listenerCount('console'));
+      }
+      expect(new Set(counts).size, `listener counts drifted: ${counts.join(', ')}`).toBe(1);
+    } finally {
+      await session.close();
+    }
+  });
+});
