@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2 — 2026-07-22
+
+- **`repro rm <name>`**, and `repro_delete` on the MCP server. Repros are disposable by design and there was no way to dispose of one — you had to know the `.repros/` layout and delete two paths by hand. A verified fix now says so and names the command, and the MCP tool description tells an agent to clean up after confirming its own fix.
+
 ## 0.4.1 — 2026-07-22
 
 - **Clicks now target the control, not its label.** A card-style option — icon plus text inside a pressable wrapper — put the cursor over the label, so that is what the click event named. Component libraries routinely set `pointer-events: none` on text, and Playwright then reports the parent "intercepts pointer events" and retries until it times out. Reproduced exactly: 60 retries, then failure. The recorder now recognises the wrapper (`role`, `tabindex`, `data-focusable`, `onclick`) and selects it by its own visible text — `div[data-focusable="true"]:has-text("Household expenses")` — which clicks first time whether or not the label is transparent to the pointer.

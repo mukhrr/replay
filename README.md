@@ -34,7 +34,10 @@ repro record checkout-crash --url http://localhost:3000   # click the bug once
 repro run checkout-crash                                  # bug still reproduces?
 repro run checkout-crash --expect-fixed                   # did my fix work?
 repro list
+repro rm checkout-crash                                   # once it's fixed
 ```
+
+**Delete a repro when its bug is fixed.** That is what makes this different from a test suite: a repro captures one bug and is finished the moment that bug is gone. Left behind, it rots against a moving app and becomes a test nobody meant to write. `repro run --expect-fixed` reminds you, and the MCP server exposes `repro_delete` so an agent can clean up after verifying its own fix.
 
 Stop recording with **Ctrl/Cmd + Shift + X**, or just close the browser.
 

@@ -58,6 +58,7 @@ describe('mcp server', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'repro_artifacts',
+      'repro_delete',
       'repro_list',
       'repro_run',
     ]);
@@ -148,6 +149,30 @@ describe('mcp server', () => {
       expect(result.content[0]?.text).toMatch(/did not occur/i);
     } finally {
       await writeFile(irPath, original);
+    }
+  });
+
+  it('tells the agent to clean up once a fix is verified', async () => {
+    // Repros are disposable by design. Left behind they rot against a moving
+    // app and become tests nobody meant to write.
+    const del = (await client.listTools()).tools.find((t) => t.name === 'repro_delete');
+    expect(del?.description).toMatch(/disposable/i);
+    expect(del?.description).toMatch(/after repro_run/i);
+  });
+
+  it('deletes a repro and reports whether it existed', async () => {
+    const { readFile, writeFile } = await import('node:fs/promises');
+    const irPath = path.join(root, '.repros/checkout-crash.json');
+    const backup = await readFile(irPath, 'utf8');
+    try {
+      const gone = await call('repro_delete', { name: 'checkout-crash' });
+      expect(gone.structuredContent?.deleted).toBe(true);
+
+      const again = await call('repro_delete', { name: 'checkout-crash' });
+      expect(again.structuredContent?.deleted).toBe(false);
+      expect(again.content[0]?.text).toContain('No repro named');
+    } finally {
+      await writeFile(irPath, backup);
     }
   });
 

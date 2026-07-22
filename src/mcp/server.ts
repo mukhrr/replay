@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { list, readRepro, reproPaths, run } from '../api.js';
+import { deleteRepro, list, readRepro, reproPaths, run } from '../api.js';
 import { BrowserPool } from '../browser.js';
 import { VERSION } from '../version.js';
 import type { RunResult } from '../replayer/run.js';
@@ -69,7 +69,8 @@ function summarize(result: RunResult, expectFixed: boolean): string {
 
   if (result.passed) {
     return expectFixed
-      ? `${head}\nThe flow completed and the recorded bug did not occur.`
+      ? `${head}\nThe flow completed and the recorded bug did not occur.\n` +
+        `This repro has done its job — delete it with repro_delete unless the developer wants it kept.`
       : `${head}\nThe recorded outcome still occurs, so the repro itself is sound.`;
   }
 
@@ -215,6 +216,34 @@ export function createReplayServer(root = process.cwd()): ReplayServer {
           baseUrl: result.baseUrl,
           screenshot: result.finalScreenshot,
         },
+      };
+    },
+  );
+
+  server.registerTool(
+    'repro_delete',
+    {
+      title: 'Delete a bug repro',
+      description:
+        'Delete a repro and its artifacts once its bug is fixed. Repros are disposable by design: they capture one bug, ' +
+        'and left behind they rot against a moving app and become tests nobody meant to write. ' +
+        'Call this after repro_run with expect_fixed=true has confirmed the fix, unless the developer asked to keep it.',
+      inputSchema: {
+        name: z.string().describe('Name of the repro to delete.'),
+      },
+    },
+    async ({ name }) => {
+      const existed = await deleteRepro(name, root);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: existed
+              ? `Deleted ${name}, along with its session and artifacts.`
+              : `No repro named ${name}.`,
+          },
+        ],
+        structuredContent: { name, deleted: existed },
       };
     },
   );

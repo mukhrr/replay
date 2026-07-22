@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Command } from 'commander';
 import {
   assertRepro,
+  deleteRepro,
   fixRepro,
   list,
   PartialRecordingError,
@@ -155,6 +156,22 @@ program
 const collect = (value: string, previous: string[] = []): string[] => [...previous, value];
 
 program
+  .command('rm')
+  .alias('delete')
+  .argument('<names...>', 'repros to delete')
+  .description('delete a repro once its bug is fixed — they are meant to be disposable')
+  .action(async (names: string[]) => {
+    for (const name of names) {
+      const existed = await deleteRepro(name);
+      console.log(
+        existed
+          ? `  ${green('✓')} deleted ${cyan(name)} ${dim('(IR, session and artifacts)')}`
+          : `  ${yellow('!')} no repro named ${cyan(name)}`,
+      );
+    }
+  });
+
+program
   .command('fix')
   .argument('<name>', 'name of the repro to repair')
   .description('repair a recorded repro without hand-editing its JSON')
@@ -238,6 +255,11 @@ function reportPass(result: RunResult): void {
   console.log(
     `${verdict}  ${bold(result.name)} ${dim(`(${result.timings.length} steps in ${ms(result.durationMs)})`)}`,
   );
+  if (result.expectFixed) {
+    // The repro has done its job. Left behind, it rots against a moving app and
+    // becomes a test nobody meant to write.
+    console.log(dim(`  This repro is finished — delete it with:  repro rm ${result.name}`));
+  }
 }
 
 function reportFail(result: RunResult): void {
